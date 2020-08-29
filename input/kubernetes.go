@@ -13,19 +13,19 @@ import (
 	bmeta "github.com/Jeffail/benthos/v3/lib/message/metadata"
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/types"
+	klog "github.com/cludden/benthos-kubernetes-input/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
-	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/event"
-	"sigs.k8s.io/controller-runtime/pkg/handler"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
-	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
 func init() {
@@ -53,14 +53,18 @@ This plugin streams changes to kubernetes objects from a given cluster.`,
 
 //------------------------------------------------------------------------------
 
-var emptyobj = []byte("{}")
-
 // KubernetesConfig defines runtime configuration for a kubernetes input
 type KubernetesConfig struct {
-	Group    string    `json:"group" yaml:"group"`
-	Version  string    `json:"version" yaml:"version"`
-	Kind     string    `json:"kind" yaml:"kind"`
-	Selector *selector `json:"selector,omitempty" yaml:"selector,omitempty"`
+	Watches []Watch `json:"watches,omitempty" yaml:"watches,omitempty"`
+}
+
+// Watch defines a controller configuration
+type Watch struct {
+	Group      string    `json:"group" yaml:"group"`
+	Version    string    `json:"version" yaml:"version"`
+	Kind       string    `json:"kind" yaml:"kind"`
+	Namespaces []string  `json:"namespaces,omitempty" yaml:"namespaces,omitempty"`
+	Selector   *selector `json:"selector,omitempty" yaml:"selector,omitempty"`
 }
 
 type selector struct {
@@ -80,26 +84,53 @@ func NewKubernetesConfig() *KubernetesConfig {
 }
 
 // GVK returns a GroupVersionKind value
-func (c *KubernetesConfig) GVK() schema.GroupVersionKind {
+func (w *Watch) GVK() schema.GroupVersionKind {
 	gvk := schema.GroupVersionKind{
-		Group:   c.Group,
-		Version: c.Version,
-		Kind:    c.Kind,
+		Group:   w.Group,
+		Version: w.Version,
+		Kind:    w.Kind,
 	}
 	return gvk
 }
 
-// Predicates returns a list of watch predicates using runtime config
-func (c *KubernetesConfig) Predicates() ([]predicate.Predicate, error) {
-	predicates := []predicate.Predicate{}
+// Options returns a list of watch predicates using runtime config
+func (w *Watch) Options() ([]builder.ForOption, error) {
+	var opts []builder.ForOption
 
-	if c.Selector != nil {
-		selector := metav1.LabelSelector{
-			MatchLabels: c.Selector.MatchLabels,
+	if len(w.Namespaces) > 0 {
+		namespaces := map[string]struct{}{}
+		for _, ns := range w.Namespaces {
+			namespaces[ns] = struct{}{}
 		}
 
-		for i := 0; i < len(c.Selector.MatchExpressions); i++ {
-			expr := c.Selector.MatchExpressions[i]
+		matchesNamespace := func(ns string) bool {
+			_, ok := namespaces[ns]
+			return ok
+		}
+
+		opts = append(opts, builder.WithPredicates(predicate.Funcs{
+			CreateFunc: func(e event.CreateEvent) bool {
+				return matchesNamespace(e.Meta.GetNamespace())
+			},
+			DeleteFunc: func(e event.DeleteEvent) bool {
+				return matchesNamespace(e.Meta.GetNamespace())
+			},
+			GenericFunc: func(e event.GenericEvent) bool {
+				return matchesNamespace(e.Meta.GetNamespace())
+			},
+			UpdateFunc: func(e event.UpdateEvent) bool {
+				return matchesNamespace(e.MetaNew.GetNamespace())
+			},
+		}))
+	}
+
+	if w.Selector != nil {
+		selector := metav1.LabelSelector{
+			MatchLabels: w.Selector.MatchLabels,
+		}
+
+		for i := 0; i < len(w.Selector.MatchExpressions); i++ {
+			expr := w.Selector.MatchExpressions[i]
 			selector.MatchExpressions = append(selector.MatchExpressions, metav1.LabelSelectorRequirement{
 				Key:      expr.Key,
 				Operator: expr.Operator,
@@ -110,10 +141,10 @@ func (c *KubernetesConfig) Predicates() ([]predicate.Predicate, error) {
 		if selector.Size() > 0 {
 			selector, err := metav1.LabelSelectorAsSelector(&selector)
 			if err != nil {
-				return predicates, fmt.Errorf("error parsing selector: %v", err)
+				return nil, fmt.Errorf("error parsing selector: %v", err)
 			}
 
-			predicates = append(predicates, predicate.Funcs{
+			opts = append(opts, builder.WithPredicates(predicate.Funcs{
 				CreateFunc: func(e event.CreateEvent) bool {
 					return selector.Matches(labels.Set(e.Meta.GetLabels()))
 				},
@@ -126,19 +157,17 @@ func (c *KubernetesConfig) Predicates() ([]predicate.Predicate, error) {
 				UpdateFunc: func(e event.UpdateEvent) bool {
 					return selector.Matches(labels.Set(e.MetaNew.GetLabels()))
 				},
-			})
-
+			}))
 		}
 	}
 
-	return predicates, nil
+	return opts, nil
 }
 
 //------------------------------------------------------------------------------
 
 // Kubernetes input watches one or more k8s resources
 type Kubernetes struct {
-	gvk schema.GroupVersionKind
 	mgr manager.Manager
 
 	resChan          chan types.Response
@@ -159,16 +188,10 @@ func NewKubernetes(
 	log log.Modular,
 	stats metrics.Type,
 ) (input.Type, error) {
-	gvk := conf.GVK()
-
+	logf.SetLogger(klog.New(log))
 	// define input
 	c := &Kubernetes{
-		gvk: gvk,
-
-		log: log.WithFields(map[string]string{
-			"gvk": gvk.String(),
-		}),
-
+		log:   log,
 		stats: stats,
 
 		resChan:          make(chan types.Response),
@@ -184,34 +207,28 @@ func NewKubernetes(
 		return nil, err
 	}
 
-	// initialize controller
-	ctlr, err := controller.New("component-controller", cmgr, controller.Options{
-		Reconciler: c,
-	})
+	// register controllers for each configured watch
+	for _, w := range conf.Watches {
+		gvk := w.GVK()
+		u := unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
 
-	if err != nil {
-		log.Errorf("unable to set up individual controller: %v", err)
-		return nil, err
+		opts, err := w.Options()
+		if err != nil {
+			return nil, fmt.Errorf("error creating predicates for gvk %s: %v", gvk.String(), err)
+		}
 
-	}
+		err = builder.ControllerManagedBy(cmgr).
+			For(&u, opts...).
+			Complete(c.Reconciler(gvk))
+		if err != nil {
+			return nil, fmt.Errorf("could not create controller for gvk %s: %v", gvk.String(), err)
+		}
 
-	log.Debugln("initializing watch")
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(c.gvk)
-
-	predicates, err := conf.Predicates()
-	if err != nil {
-		log.Errorf("error computing watch predicates: %v", err)
-		return nil, err
-	}
-
-	if err := ctlr.Watch(&source.Kind{Type: u}, &handler.EnqueueRequestForObject{}, predicates...); err != nil {
-		log.Errorf("error initializing watch: %v", err)
-		return nil, err
+		log.Infof("registered controller for %s", gvk.String())
 	}
 
 	c.mgr = cmgr
-
 	go c.loop()
 	return c, nil
 }
@@ -259,62 +276,72 @@ func (k *Kubernetes) loop() {
 
 //------------------------------------------------------------------------------
 
-// Reconcile implements the required controller interface
-func (k *Kubernetes) Reconcile(req reconcile.Request) (reconcile.Result, error) {
-	resp := reconcile.Result{}
-	log := k.log.WithFields(map[string]string{
-		"namespace": req.Namespace,
-		"name":      req.Name,
-	})
+// Reconciler returns a reconciler function scoped to the specified GVK
+func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconciler {
+	return reconcile.Func(func(req reconcile.Request) (reconcile.Result, error) {
+		resp := reconcile.Result{}
+		fields := map[string]string{
+			"group":     gvk.Group,
+			"kind":      gvk.Kind,
+			"namespace": req.Namespace,
+			"name":      req.Name,
+			"version":   gvk.Version,
+		}
+		log := k.log.WithFields(fields)
 
-	u := unstructured.Unstructured{}
-	u.SetGroupVersionKind(k.gvk)
-	if err := k.mgr.GetCache().Get(context.Background(), req.NamespacedName, &u); err != nil {
-		log.Infoln("error fetching object ")
-		return resp, client.IgnoreNotFound(err)
-	}
+		u := unstructured.Unstructured{}
+		u.SetGroupVersionKind(gvk)
 
-	b, err := u.MarshalJSON()
-	if err != nil {
-		log.Errorf("error marshalling object: %v", err)
-		return resp, err
-	}
-
-	part := message.NewPart(b)
-	part.SetMetadata(bmeta.New(map[string]string{}))
-	msg := message.New(nil)
-	msg.Append(part)
-
-	// send batch to downstream processors
-	select {
-	case k.transactionsChan <- types.NewTransaction(msg, k.resChan):
-	case <-k.closeChan:
-		k.log.Infoln("input closing...")
-		return resp, nil
-	}
-
-	// check transaction success
-	select {
-	case result := <-k.resChan:
-		// check for requeue after metadata attribute
-		requeueAfter := msg.Get(0).Metadata().Get("requeue_after")
-		if requeueAfter != "" {
-			requeueAfterDur, err := time.ParseDuration(requeueAfter)
-			if err != nil {
-				log.Warnf("invalid requeue_after duration: %s", requeueAfter)
-			} else {
-				log.Debugf("requeueing object after %s", requeueAfter)
-				resp.RequeueAfter = requeueAfterDur
+		if err := k.mgr.GetCache().Get(context.Background(), req.NamespacedName, &u); err != nil {
+			if err := client.IgnoreNotFound(err); err != nil {
+				log.Debugf("error fetching object: %v", err)
+				return resp, err
 			}
+			fields["deleted"] = "1"
 		}
 
-		// handle error
-		if err := result.Error(); err != nil {
-			log.Errorln(err.Error())
+		b, err := u.MarshalJSON()
+		if err != nil {
+			log.Errorf("error marshalling object: %v", err)
 			return resp, err
 		}
-	case <-k.closeChan:
-	}
 
-	return resp, nil
+		part := message.NewPart(b)
+		part.SetMetadata(bmeta.New(fields))
+		msg := message.New(nil)
+		msg.Append(part)
+
+		// send batch to downstream processors
+		select {
+		case k.transactionsChan <- types.NewTransaction(msg, k.resChan):
+		case <-k.closeChan:
+			k.log.Infoln("input closing...")
+			return resp, nil
+		}
+
+		// check transaction success
+		select {
+		case result := <-k.resChan:
+			// check for requeue after metadata attribute
+			requeueAfter := msg.Get(0).Metadata().Get("requeue_after")
+			if requeueAfter != "" {
+				requeueAfterDur, err := time.ParseDuration(requeueAfter)
+				if err != nil {
+					log.Warnf("invalid requeue_after duration: %s", requeueAfter)
+				} else {
+					log.Debugf("requeueing object after %s", requeueAfter)
+					resp.RequeueAfter = requeueAfterDur
+				}
+			}
+
+			// handle error
+			if err := result.Error(); err != nil {
+				log.Errorln(err.Error())
+				return resp, err
+			}
+		case <-k.closeChan:
+		}
+
+		return resp, nil
+	})
 }

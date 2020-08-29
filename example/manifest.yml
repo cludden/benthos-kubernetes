@@ -1,0 +1,49 @@
+---
+apiVersion: example.com/v1
+kind: Foo
+metadata:
+  name: one
+  labels:
+    color: green
+  finalizers:
+    - finalizer.foos.example.com
+spec:
+  size: 1
+
+---
+apiVersion: example.com/v1
+kind: Foo
+metadata:
+  name: two
+  namespace: kube-system
+  labels:
+    color: yellow
+  finalizers:
+    - finalizer.foos.example.com
+spec:
+  size: 2
+
+---
+apiVersion: example.com/v1
+kind: Bar
+metadata:
+  name: three
+  labels:
+    color: blue
+  finalizers:
+    - finalizer.bars.example.com
+spec:
+  size: 3
+
+---
+apiVersion: example.com/v1
+kind: Bar
+metadata:
+  name: four
+  namespace: kube-system
+  labels:
+    color: purple
+  finalizers:
+    - finalizer.bars.example.com
+spec:
+  size: 4

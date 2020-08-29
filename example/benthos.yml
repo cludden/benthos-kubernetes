@@ -1,19 +1,49 @@
 input:
   type: kubernetes
   plugin:
-    group: example.com
-    version: v1
-    kind: Foo
+    watches:
+      - group: example.com
+        version: v1
+        kind: Foo
+      - group: example.com
+        version: v1
+        kind: Bar
 
 pipeline:
   processors:
     - bloblang: |
         object = this
+        metadata = meta()
         action = match {
-          metadata.exists("deletionTimestamp") && metadata.get("finalizers").or([]).join(",") == "finalizer.foos.example.com" => "deprovision"
+          meta().exists("deleted") => "deleted"
+          metadata.exists("deletionTimestamp") && metadata.get("finalizers").or([]).join(",") == "finalizer.%ss.example.com".format(meta("kind").lowercase()) => "deprovision"
           metadata.exists("deletionTimestamp") => "deleting"
           _ => "provision"
         }
 
+    - conditional:
+        condition:
+          bloblang: action != "deleted"
+        processors:
+          - cache:
+              cache: objects
+              operator: set
+              key: ${!meta("kind")}/${!meta("namespace")}/${!meta("name")}
+              value: ${!json("object").string()}
+        else_processors:
+          - branch:
+              request_map: 'root = ""'
+              processors:
+                - cache:
+                    cache: objects
+                    operator: get
+                    key: ${!meta("kind")}/${!meta("namespace")}/${!meta("name")}
+              result_map: root.object = this
+
 output:
   stdout: {}
+
+resources:
+  caches:
+    objects:
+      memory: {}
