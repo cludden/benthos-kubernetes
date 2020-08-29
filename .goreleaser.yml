@@ -1,0 +1,36 @@
+# This is an example goreleaser.yaml file with some sane defaults.
+# Make sure to check the documentation at http://goreleaser.com
+project_name: benthos-kubernetes
+
+before:
+  hooks:
+    # You may remove this if you don't use go modules.
+    - go mod download
+
+builds:
+  - id: benthos-kubernetes
+    main: ./cmd/benthos-kubernetes/main.go
+    goarch:
+      - amd64
+    goos:
+      - linux
+      - darwin
+    env:
+      - CGO_ENABLED=0
+
+archives:
+  - files:
+      - none*
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"

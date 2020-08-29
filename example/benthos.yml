@@ -1,0 +1,19 @@
+input:
+  type: kubernetes
+  plugin:
+    group: example.com
+    version: v1
+    kind: Foo
+
+pipeline:
+  processors:
+    - bloblang: |
+        object = this
+        action = match {
+          metadata.exists("deletionTimestamp") && metadata.get("finalizers").or([]).join(",") == "finalizer.foos.example.com" => "deprovision"
+          metadata.exists("deletionTimestamp") => "deleting"
+          _ => "provision"
+        }
+
+output:
+  stdout: {}
