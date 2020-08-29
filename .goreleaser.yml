@@ -1,6 +1,6 @@
 # This is an example goreleaser.yaml file with some sane defaults.
 # Make sure to check the documentation at http://goreleaser.com
-project_name: benthos-kubernetes
+project_name: benthos
 
 before:
   hooks:
@@ -8,8 +8,8 @@ before:
     - go mod download
 
 builds:
-  - id: benthos-kubernetes
-    main: ./cmd/benthos-kubernetes/main.go
+  - id: benthos
+    main: ./cmd/benthos/main.go
     goarch:
       - amd64
     goos:
@@ -34,3 +34,19 @@ changelog:
     exclude:
       - "^docs:"
       - "^test:"
+
+release:
+  github:
+    owner: cludden
+    name: benthos-kubernetes-input
+
+dockers:
+  - binaries:
+      - benthos
+    builds:
+      - benthos
+    dockerfile: Dockerfile
+    image_templates:
+      - "cludden/benthos-kubernetes-input:latest"
+      - "cludden/benthos-kubernetes-input:{{ .Tag }}"
+      - "cludden/benthos-kubernetes-input:v{{ .Major }}"
