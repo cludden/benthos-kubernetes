@@ -1,5 +1,15 @@
-# benthos-kubernetes-input
-a [benthos](https://github.com/Jeffail/benthos) kubernetes input plugin that streams resource messages based on one or more configured watches.
+# benthos-kubernetes
+
+a kubernetes plugin [benthos](https://github.com/Jeffail/benthos) which includes the following components:
+
+**Inputs:**
+
+- `kubernetes` streams kubernetes objects for one or more configured watches
+
+**Outputs:**
+
+- `kubernetes` creates, updates, and deleted kubernetes objects
+- `kubernetes_status` writes object status to kubernetes
 
 ## Installing
 - with Docker

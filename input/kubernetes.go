@@ -13,7 +13,7 @@ import (
 	bmeta "github.com/Jeffail/benthos/v3/lib/message/metadata"
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/types"
-	klog "github.com/cludden/benthos-kubernetes-input/log"
+	klog "github.com/cludden/benthos-kubernetes/log"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -200,7 +200,7 @@ func NewKubernetes(
 		closedChan:       make(chan struct{}),
 	}
 
-	// initalize manager
+	// initalize controller manager
 	cmgr, err := manager.New(config.GetConfigOrDie(), manager.Options{})
 	if err != nil {
 		log.Errorf("error initializing controller manager: %v", err)

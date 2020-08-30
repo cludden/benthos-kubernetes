@@ -38,7 +38,7 @@ changelog:
 release:
   github:
     owner: cludden
-    name: benthos-kubernetes-input
+    name: benthos-kubernetes
 
 dockers:
   - binaries:
@@ -47,6 +47,6 @@ dockers:
       - benthos
     dockerfile: Dockerfile
     image_templates:
-      - "cludden/benthos-kubernetes-input:latest"
-      - "cludden/benthos-kubernetes-input:{{ .Tag }}"
-      - "cludden/benthos-kubernetes-input:v{{ .Major }}"
+      - "cludden/benthos-kubernetes:latest"
+      - "cludden/benthos-kubernetes:{{ .Tag }}"
+      - "cludden/benthos-kubernetes:v{{ .Major }}"
