@@ -12,15 +12,18 @@ a kubernetes plugin [benthos](https://github.com/Jeffail/benthos) which includes
 - `kubernetes_status` writes object status to kubernetes
 
 ## Installing
+
 - with Docker
   ```shell
-  $ docker run cludden/benthos-kubernetes-input -h
+  $ docker run cludden/benthos-kubernetes -h
   ```
-- download a [release](https://github.com/cludden/benthos-kubernetes-input/releases)
-- as benthos [plugin](./cmd/benthos/main.go)
+- download a [release](https://github.com/cludden/benthos-kubernetes/releases)
+- as a benthos [plugin](./cmd/benthos/main.go)
 
 ## Getting Started
+
 Sample benthos stream config:
+
 ```yaml
 input:
   type: kubernetes
@@ -50,10 +53,13 @@ input:
 output:
   stdout: {}
 ```
+
 Or see [examples](./example)
 
 ## Metadata
+
 This input adds the following metadata fields to each message:
+
 ```
 - deleted (present only if object has been deleted)
 - group
@@ -64,5 +70,6 @@ This input adds the following metadata fields to each message:
 ```
 
 ## License
+
 Licensed under the [MIT License](LICENSE.md)  
 Copyright (c) 2020 Chris Ludden

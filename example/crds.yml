@@ -24,6 +24,9 @@ spec:
               properties:
                 size:
                   type: number
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true
       subresources:
         status: {}
       additionalPrinterColumns:

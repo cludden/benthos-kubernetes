@@ -1,0 +1,51 @@
+input:
+  type: kubernetes
+  plugin:
+    watches:
+      - group: example.com
+        version: v1
+        kind: Bar
+
+pipeline:
+  processors:
+    - conditional:
+        condition:
+          bloblang: meta().exists("deleted")
+        processors:
+          - log:
+              message: deletion detected, substituting last cached object image...
+          - cache:
+              cache: objects
+              operator: get
+              key: ${!meta("kind")}/${INVISION_CONTEXT}/${!meta("namespace")}/${!meta("name")}
+        else_processors:
+          - cache:
+              cache: objects
+              operator: set
+              key: ${!meta("kind")}/${INVISION_CONTEXT}/${!meta("namespace")}/${!meta("name")}
+              value: ${!content()}
+
+    - bloblang: |
+        map finalizer {
+          root = this
+          metadata.finalizers = metadata.finalizers.or([]).append("finalizer.bars.example.com")
+        }
+        root = match {
+          meta().exists("deleted") || metadata.finalizers.or([]).contains("finalizer.bars.example.com") => deleted()
+          _ => this.apply("finalizer")
+        }
+
+output:
+  broker:
+    outputs:
+      - type: kubernetes
+        plugin: {}
+      - stdout: {}
+
+logger:
+  level: info
+
+resources:
+  caches:
+    objects:
+      memory: {}
