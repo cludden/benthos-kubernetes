@@ -21,6 +21,9 @@ import (
 func init() {
 	Constructors[TypeHTTP] = TypeSpec{
 		constructor: NewHTTP,
+		Categories: []Category{
+			CategoryIntegration,
+		},
 		Summary: `
 Performs an HTTP request using a message batch as the request body, and replaces
 the original message parts with the body of the response.`,
@@ -39,8 +42,7 @@ interpolations described [here](/docs/configuration/interpolation#bloblang-queri
 
 In order to map or encode the payload to a specific request body, and map the
 response back into the original payload instead of replacing it entirely, you
-can use the ` + "[`process_map`](/docs/components/processors/process_map)" + ` or
- ` + "[`process_field`](/docs/components/processors/process_field)" + ` processors.
+can use the ` + "[`branch` processor](/docs/components/processors/branch)" + `.
 
 ## Response Codes
 
@@ -73,6 +75,24 @@ can read about these patterns [here](/docs/configuration/error_handling).`,
 			docs.FieldDeprecated("max_parallel"),
 			docs.FieldDeprecated("request"),
 		}, client.FieldSpecs()...),
+		Examples: []docs.AnnotatedExample{
+			{
+				Title: "Branched Request",
+				Summary: `
+This example uses a ` + "[`branch` processor](/docs/components/processors/branch/)" + ` to strip the request message into an empty body, grab an HTTP payload, and place the result back into the original message at the path ` + "`repo.status`" + `:`,
+				Config: `
+pipeline:
+  processors:
+    - branch:
+        request_map: 'root = ""'
+        processors:
+          - http:
+              url: https://hub.docker.com/v2/repositories/jeffail/benthos
+              verb: GET
+        result_map: 'root.repo.status = this'
+`,
+			},
+		},
 		sanitiseConfigFunc: func(conf Config) (interface{}, error) {
 			cBytes, err := json.Marshal(conf.HTTP)
 			if err != nil {
@@ -189,7 +209,7 @@ func (h *HTTP) ProcessMessage(msg types.Message) ([]types.Message, types.Respons
 			}
 			h.mErr.Incr(1)
 			h.mErrHTTP.Incr(1)
-			h.log.Errorf("HTTP request to '%v' failed: %v\n", h.conf.HTTP.Client.URL, err)
+			h.log.Errorf("HTTP request to '%v' failed: %v\n", h.conf.HTTP.URL, err)
 			responseMsg = msg.Copy()
 			responseMsg.Iter(func(i int, p types.Part) error {
 				if len(codeStr) > 0 {
@@ -262,7 +282,7 @@ func (h *HTTP) ProcessMessage(msg types.Message) ([]types.Message, types.Respons
 			if err := <-resChan; err != nil {
 				h.mErr.Incr(1)
 				h.mErrHTTP.Incr(1)
-				h.log.Errorf("HTTP parallel request to '%v' failed: %v\n", h.conf.HTTP.Client.URL, err)
+				h.log.Errorf("HTTP parallel request to '%v' failed: %v\n", h.conf.HTTP.URL, err)
 			}
 		}
 
@@ -273,7 +293,7 @@ func (h *HTTP) ProcessMessage(msg types.Message) ([]types.Message, types.Respons
 
 	if responseMsg.Len() < 1 {
 		return nil, response.NewError(fmt.Errorf(
-			"HTTP response from '%v' was empty", h.conf.HTTP.Client.URL,
+			"HTTP response from '%v' was empty", h.conf.HTTP.URL,
 		))
 	}
 

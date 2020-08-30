@@ -32,7 +32,7 @@ github.com/Azure/go-autorest/autorest/date
 github.com/Azure/go-autorest/logger
 # github.com/Azure/go-autorest/tracing v0.6.0
 github.com/Azure/go-autorest/tracing
-# github.com/Jeffail/benthos/v3 v3.25.0
+# github.com/Jeffail/benthos/v3 v3.26.0
 ## explicit
 github.com/Jeffail/benthos/v3/internal/batch
 github.com/Jeffail/benthos/v3/internal/bloblang

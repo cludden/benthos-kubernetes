@@ -17,6 +17,18 @@ import (
 
 //------------------------------------------------------------------------------
 
+// Category describes the general purpose of a processor.
+type Category string
+
+// Processor categories
+var (
+	CategoryMapping     Category = "Mapping"
+	CategoryParsing     Category = "Parsing"
+	CategoryIntegration Category = "Integration"
+	CategoryComposition Category = "Composition"
+	CategoryUtility     Category = "Utility"
+)
+
 // TypeSpec Constructor and a usage description for each processor type.
 type TypeSpec struct {
 	constructor func(
@@ -30,6 +42,8 @@ type TypeSpec struct {
 	Summary     string
 	Description string
 	Footnotes   string
+
+	Categories []Category
 
 	// UsesBatches indicates whether this processors functionality is best
 	// applied on messages that are already batched.
@@ -340,11 +354,17 @@ func (conf *Config) UnmarshalYAML(value *yaml.Node) error {
 	aliased := confAlias(NewConfig())
 
 	if err := value.Decode(&aliased); err != nil {
+		if strings.HasPrefix(err.Error(), "line ") {
+			return err
+		}
 		return fmt.Errorf("line %v: %v", value.Line, err)
 	}
 
 	var raw interface{}
 	if err := value.Decode(&raw); err != nil {
+		if strings.HasPrefix(err.Error(), "line ") {
+			return err
+		}
 		return fmt.Errorf("line %v: %v", value.Line, err)
 	}
 	if typeCandidates := config.GetInferenceCandidates(raw); len(typeCandidates) > 0 {
@@ -375,6 +395,11 @@ func (conf *Config) UnmarshalYAML(value *yaml.Node) error {
 		}
 		aliased.Plugin = conf
 	} else {
+		if !exists {
+			if _, exists = Constructors[aliased.Type]; !exists {
+				return fmt.Errorf("line %v: processor type '%v' was not recognised", value.Line, aliased.Type)
+			}
+		}
 		aliased.Plugin = nil
 	}
 

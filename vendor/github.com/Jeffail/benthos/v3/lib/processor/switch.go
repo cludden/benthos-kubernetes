@@ -2,6 +2,7 @@ package processor
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"time"
 
@@ -18,6 +19,9 @@ import (
 func init() {
 	Constructors[TypeSwitch] = TypeSpec{
 		constructor: NewSwitch,
+		Categories: []Category{
+			CategoryComposition,
+		},
 		Summary: `
 A processor that lists child case objects each containing a condition and
 processors. Each batch of messages is tested against the condition of each child
@@ -187,7 +191,7 @@ func NewSwitch(
 			log.NewModule("."+prefix+".condition"),
 			metrics.Namespaced(stats, prefix+".condition"),
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("case [%v] condition: %w", i, err)
 		}
 
 		for j, procConf := range caseConf.Processors {
@@ -198,7 +202,7 @@ func NewSwitch(
 				log.NewModule("."+procPrefix),
 				metrics.Namespaced(stats, procPrefix),
 			); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("case [%v] processor [%v]: %w", i, j, err)
 			}
 			procs = append(procs, proc)
 		}
