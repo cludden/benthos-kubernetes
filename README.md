@@ -50,13 +50,41 @@ input:
               operator: NotIn
               values: [green, yellow]
 
+pipeline:
+  processors:
+    - bloblang: |
+        root = match {
+          meta().exists("deleted") => deleted()
+        }
+
 output:
-  stdout: {}
+  broker:
+    outputs:
+      - type: kubernetes
+        plugin: {}
+        processors:
+          - bloblang: |
+              map finalizer {
+                root = this
+                metadata.finalizers = metadata.finalizers.append("finalizer.example.com")
+              }
+              root = match {
+                metadata.finalizers.or([]).contains("finalizer.example.com") => deleted()
+                _ => this.apply("finalizer")
+              }
+      - type: kubernetes_status
+        plugin: {}
+        processors:
+          - bloblang: |
+              map status {
+                root = this
+                status.status = "Reconciled"
+              }
 ```
 
 Or see [examples](./example)
 
-## Metadata
+### Metadata
 
 This input adds the following metadata fields to each message:
 
