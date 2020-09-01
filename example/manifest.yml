@@ -6,7 +6,6 @@ metadata:
   labels:
     color: green
   finalizers:
-    - finalizer.foos.example.com
     - random
 spec:
   size: 1

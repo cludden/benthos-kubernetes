@@ -5,52 +5,16 @@ input:
       - group: example.com
         version: v1
         kind: Foo
-      # - group: example.com
-      #   version: v1
-      #   kind: Bar
+        owns:
+          - group: example.com
+            version: v1
+            kind: Bar
 
 pipeline:
   processors:
-    - conditional:
-        condition:
-          bloblang: meta().exists("deleted")
-        processors:
-          - log:
-              message: deletion detected, substituting last cached object image...
-          - cache:
-              cache: objects
-              operator: get
-              key: ${!meta("kind")}/${INVISION_CONTEXT}/${!meta("namespace")}/${!meta("name")}
-        else_processors:
-          - cache:
-              cache: objects
-              operator: set
-              key: ${!meta("kind")}/${INVISION_CONTEXT}/${!meta("namespace")}/${!meta("name")}
-              value: ${!content()}
-
     - bloblang: |
-        let metadataKeys = ["deletionTimestamp","finalizers"]
-        let state = {
-          "metadata": metadata.filter($metadataKeys.contains(this.key)),
-          "spec": spec
-        }
-        let hash = $state.string().hash("sha1").encode("hex")
-        let finalizer = "finalizer.%ss.example.com".format(kind.lowercase())
-        let finalizers = metadata.finalizers.or([])
-
-        map reconciling {
-          root = obj
-          status.hash = hash
-          status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.999999999Z")
-          status.status = "Reconciling"
-        }
-
-        meta hash = $hash
         root = match {
-          meta().exists("deleted") => this
-          metadata.exists("deletionTimestamp") && $finalizers.join(",") != $finalizer => deleted()
-          status.hash.or("") == $hash => deleted()
-          _ => {"obj":this,"hash":$hash}.apply("reconciling")
+          meta().exists("deleted") => deleted()
         }
 
 output:
@@ -60,11 +24,14 @@ output:
         plugin: {}
         processors:
           - bloblang: |
-              root = match {
-                meta().exists("deleted") => deleted()
+              root = this
+              status.observedGeneration = metadata.generation
+              status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.999999999Z")
+              status.status = match {
+                metadata.exists("deletionTimestamp") => "Destroying"
+                _ => "Reconciling"
               }
-          - log:
-              message: updating status
+
       - stdout: {}
 
 logger:

@@ -38,6 +38,9 @@ input:
         version: v1alpha1
         kind: Foo
         namespaces: [default, kube-system]
+        owns:
+          - version: v1
+            kind: Pod
       # watch custom resources that match a label selector
       - group: example.com
         version: v1apha1
@@ -49,6 +52,12 @@ input:
             - key: color
               operator: NotIn
               values: [green, yellow]
+      # watch pods owned by Foo
+      - version: v1
+        kind: Pod
+        owned_by:
+          group: example.com
+          kind: Foo
 
 pipeline:
   processors:

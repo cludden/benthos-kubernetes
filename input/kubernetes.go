@@ -58,45 +58,30 @@ type KubernetesConfig struct {
 	Watches []Watch `json:"watches,omitempty" yaml:"watches,omitempty"`
 }
 
-// Watch defines a controller configuration
-type Watch struct {
-	Group      string    `json:"group" yaml:"group"`
-	Version    string    `json:"version" yaml:"version"`
-	Kind       string    `json:"kind" yaml:"kind"`
-	Namespaces []string  `json:"namespaces,omitempty" yaml:"namespaces,omitempty"`
-	Selector   *selector `json:"selector,omitempty" yaml:"selector,omitempty"`
-}
-
-type selector struct {
-	MatchLabels      map[string]string     `json:"matchLabels,omitempty" yaml:"matchLabels,omitempty"`
-	MatchExpressions []selectorRequirement `json:"matchExpressions,omitempty" yaml:"matchExpressions,omitempty"`
-}
-
-type selectorRequirement struct {
-	Key      string                       `json:"key" yaml:"key"`
-	Operator metav1.LabelSelectorOperator `json:"operator" yaml:"operator"`
-	Values   []string                     `json:"values" yaml:"values"`
-}
-
 // NewKubernetesConfig creates a new KubernetesConfig with default values
 func NewKubernetesConfig() *KubernetesConfig {
 	return &KubernetesConfig{}
 }
 
-// GVK returns a GroupVersionKind value
-func (w *Watch) GVK() schema.GroupVersionKind {
-	gvk := schema.GroupVersionKind{
-		Group:   w.Group,
-		Version: w.Version,
-		Kind:    w.Kind,
-	}
-	return gvk
+// Watch defines a controller configuration
+type Watch struct {
+	ownerReference             `json:",inline" yaml:",inline"`
+	DisableGenerationPredicate bool             `json:"disable_generation_predicate" yaml:"disable_generation_predicate"`
+	Namespaces                 []string         `json:"namespaces,omitempty" yaml:"namespaces,omitempty"`
+	Owns                       []ownerReference `json:"owns,omitempty" yaml:"owns,omitempty"`
+	Selector                   *selector        `json:"selector,omitempty" yaml:"selector,omitempty"`
 }
 
 // Options returns a list of watch predicates using runtime config
 func (w *Watch) Options() ([]builder.ForOption, error) {
 	var opts []builder.ForOption
 
+	// include generation changed predicate unless explicitly disabled
+	if w.DisableGenerationPredicate != true {
+		opts = append(opts, builder.WithPredicates(predicate.GenerationChangedPredicate{}))
+	}
+
+	// include namespace filter predicate if specified
 	if len(w.Namespaces) > 0 {
 		namespaces := map[string]struct{}{}
 		for _, ns := range w.Namespaces {
@@ -124,6 +109,7 @@ func (w *Watch) Options() ([]builder.ForOption, error) {
 		}))
 	}
 
+	// include label selector predicate if specified
 	if w.Selector != nil {
 		selector := metav1.LabelSelector{
 			MatchLabels: w.Selector.MatchLabels,
@@ -162,6 +148,53 @@ func (w *Watch) Options() ([]builder.ForOption, error) {
 	}
 
 	return opts, nil
+}
+
+// Register adds a new controller to the controller manager
+func (w *Watch) Register(mgr manager.Manager, r reconcile.Reconciler) error {
+	gvk := w.GVK()
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(gvk)
+
+	opts, err := w.Options()
+	if err != nil {
+		return fmt.Errorf("error building controller options: %v", err)
+	}
+
+	bldr := builder.ControllerManagedBy(mgr).For(u, opts...)
+	for _, dep := range w.Owns {
+		owned := &unstructured.Unstructured{}
+		owned.SetGroupVersionKind(dep.GVK())
+		bldr = bldr.Owns(owned)
+	}
+
+	return bldr.Complete(r)
+}
+
+type ownerReference struct {
+	Group   string `json:"group" yaml:"group"`
+	Kind    string `json:"kind" yaml:"kind"`
+	Version string `json:"version" yaml:"version"`
+}
+
+// GVK returns a GroupVersionKind value
+func (o *ownerReference) GVK() schema.GroupVersionKind {
+	return schema.GroupVersionKind{
+		Group:   o.Group,
+		Version: o.Version,
+		Kind:    o.Kind,
+	}
+}
+
+type selector struct {
+	MatchLabels      map[string]string     `json:"matchLabels,omitempty" yaml:"matchLabels,omitempty"`
+	MatchExpressions []selectorRequirement `json:"matchExpressions,omitempty" yaml:"matchExpressions,omitempty"`
+}
+
+type selectorRequirement struct {
+	Key      string                       `json:"key" yaml:"key"`
+	Operator metav1.LabelSelectorOperator `json:"operator" yaml:"operator"`
+	Values   []string                     `json:"values" yaml:"values"`
 }
 
 //------------------------------------------------------------------------------
@@ -207,24 +240,13 @@ func NewKubernetes(
 		return nil, err
 	}
 
-	// register controllers for each configured watch
+	// register watches
 	for _, w := range conf.Watches {
 		gvk := w.GVK()
-		u := unstructured.Unstructured{}
-		u.SetGroupVersionKind(gvk)
-
-		opts, err := w.Options()
-		if err != nil {
-			return nil, fmt.Errorf("error creating predicates for gvk %s: %v", gvk.String(), err)
+		if err := w.Register(cmgr, c.Reconciler(gvk)); err != nil {
+			log.Errorf("error registering controller: %v", err)
+			return nil, err
 		}
-
-		err = builder.ControllerManagedBy(cmgr).
-			For(&u, opts...).
-			Complete(c.Reconciler(gvk))
-		if err != nil {
-			return nil, fmt.Errorf("could not create controller for gvk %s: %v", gvk.String(), err)
-		}
-
 		log.Infof("registered controller for %s", gvk.String())
 	}
 
