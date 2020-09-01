@@ -150,27 +150,21 @@ func (k *Kubernetes) WriteWithContext(ctx context.Context, msg types.Message) er
 			return fmt.Errorf("error parsing object: %v", err)
 		}
 
-		// check for delete metadata marker
-		if deleted := p.Metadata().Get("deleted"); deleted != "" {
+		switch {
+		case p.Metadata().Get("deleted") != "":
 			if err := k.client.Delete(ctx, &u); err != nil {
 				return fmt.Errorf("error deleting object: %v", err)
 			}
-			return nil
-		}
-
-		// if object has UID, update object
-		uid := u.GetUID()
-		if string(uid) != "" {
+		case string(u.GetUID()) != "":
 			if err := k.client.Update(ctx, &u); err != nil {
 				return fmt.Errorf("error updating object: %v", err)
 			}
-			return nil
+		default:
+			if err := k.client.Create(ctx, &u); err != nil {
+				return fmt.Errorf("error creating object: %v", err)
+			}
 		}
 
-		// create object
-		if err := k.client.Create(ctx, &u); err != nil {
-			return fmt.Errorf("error creating object: %v", err)
-		}
 		return nil
 	})
 }
