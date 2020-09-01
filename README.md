@@ -38,9 +38,6 @@ input:
         version: v1alpha1
         kind: Foo
         namespaces: [default, kube-system]
-        owns:
-          - version: v1
-            kind: Pod
       # watch custom resources that match a label selector
       - group: example.com
         version: v1apha1
@@ -52,12 +49,12 @@ input:
             - key: color
               operator: NotIn
               values: [green, yellow]
-      # watch pods owned by Foo
+      # watch replica sets and reconcile when their pods are modified
       - version: v1
-        kind: Pod
-        owned_by:
-          group: example.com
-          kind: Foo
+        kind: ReplicaSet
+        owns:
+          - version: v1
+            kind: Pod
 
 pipeline:
   processors:
@@ -67,28 +64,43 @@ pipeline:
         }
 
 output:
-  broker:
+  switch:
     outputs:
-      - type: kubernetes
-        plugin: {}
-        processors:
-          - bloblang: |
-              map finalizer {
+      - condition:
+          bloblang: metadata.finalizers.or([]).contains("finalizer.foos.example.com") != true
+        output:
+          type: kubernetes
+          plugin: {}
+          processors:
+            - bloblang: |
+                meta requeue_after = "1ms"
+                map finalizer {
+                  root = this
+                  metadata.finalizers = metadata.finalizers.append("finalizer.foos.example.com")
+                }
+                root = match {
+                  metadata.finalizers.or([]).contains("finalizer.foos.example.com") => deleted()
+                  _ => this.apply("finalizer")
+                }
+            - sync_response: {}
+            - log:
+                message: adding finalizer...
+
+      - output:
+          type: kubernetes_status
+          plugin: {}
+          processors:
+            - bloblang: |
                 root = this
-                metadata.finalizers = metadata.finalizers.append("finalizer.example.com")
-              }
-              root = match {
-                metadata.finalizers.or([]).contains("finalizer.example.com") => deleted()
-                _ => this.apply("finalizer")
-              }
-      - type: kubernetes_status
-        plugin: {}
-        processors:
-          - bloblang: |
-              map status {
-                root = this
-                status.status = "Reconciled"
-              }
+                status.observedGeneration = metadata.generation
+                status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.000000000Z")
+                status.status = if metadata.exists("deletionTimestamp") {
+                  "Destroying"
+                } else {
+                  "Reconciling"
+                }
+            - log:
+                message: updating status...
 ```
 
 Or see [examples](./example)
@@ -105,6 +117,8 @@ This input adds the following metadata fields to each message:
 - namespace
 - version
 ```
+
+Additionally, this input will check for a `requeue_after` metadata entry on the [synchronous response](https://www.benthos.dev/docs/guides/sync_responses), and if found, will requeue the object for reconciliation.
 
 ## License
 

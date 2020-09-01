@@ -18,17 +18,43 @@ pipeline:
         }
 
 output:
-  type: kubernetes_status
-  plugin: {}
-  processors:
-    - bloblang: |
-        root = this
-        status.observedGeneration = metadata.generation
-        status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.999999999Z")
-        status.status = match {
-          metadata.exists("deletionTimestamp") => "Destroying"
-          _ => "Reconciling"
-        }
+  switch:
+    outputs:
+      - condition:
+          bloblang: metadata.finalizers.or([]).contains("finalizer.foos.example.com") != true
+        output:
+          type: kubernetes
+          plugin: {}
+          processors:
+            - bloblang: |
+                meta requeue_after = "1ms"
+                map finalizer {
+                  root = this
+                  metadata.finalizers = metadata.finalizers.append("finalizer.foos.example.com")
+                }
+                root = match {
+                  metadata.finalizers.or([]).contains("finalizer.foos.example.com") => deleted()
+                  _ => this.apply("finalizer")
+                }
+            - sync_response: {}
+            - log:
+                message: adding finalizer...
+
+      - output:
+          type: kubernetes_status
+          plugin: {}
+          processors:
+            - bloblang: |
+                root = this
+                status.observedGeneration = metadata.generation
+                status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.000000000Z")
+                status.status = if metadata.exists("deletionTimestamp") {
+                  "Destroying"
+                } else {
+                  "Reconciling"
+                }
+            - log:
+                message: updating status...
 
 logger:
   level: info

@@ -11,6 +11,7 @@ import (
 	"github.com/Jeffail/benthos/v3/lib/log"
 	"github.com/Jeffail/benthos/v3/lib/message"
 	bmeta "github.com/Jeffail/benthos/v3/lib/message/metadata"
+	"github.com/Jeffail/benthos/v3/lib/message/roundtrip"
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/types"
 	klog "github.com/cludden/benthos-kubernetes/log"
@@ -333,6 +334,9 @@ func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconcile
 		msg := message.New(nil)
 		msg.Append(part)
 
+		store := roundtrip.NewResultStore()
+		roundtrip.AddResultStore(msg, store)
+
 		// send batch to downstream processors
 		select {
 		case k.transactionsChan <- types.NewTransaction(msg, k.resChan):
@@ -344,24 +348,29 @@ func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconcile
 		// check transaction success
 		select {
 		case result := <-k.resChan:
-			// check for requeue after metadata attribute
-			requeueAfter := msg.Get(0).Metadata().Get("requeue_after")
-			if requeueAfter != "" {
-				requeueAfterDur, err := time.ParseDuration(requeueAfter)
-				if err != nil {
-					log.Warnf("invalid requeue_after duration: %s", requeueAfter)
-				} else {
-					log.Debugf("requeueing object after %s", requeueAfter)
-					resp.RequeueAfter = requeueAfterDur
-				}
-			}
-
 			// handle error
 			if err := result.Error(); err != nil {
 				log.Errorln(err.Error())
 				return resp, err
 			}
 		case <-k.closeChan:
+		}
+
+		for _, resMsg := range store.Get() {
+			resMsg.Iter(func(i int, part types.Part) error {
+				// check for requeue after metadata attribute
+				requeueAfter := part.Metadata().Get("requeue_after")
+				if requeueAfter != "" {
+					requeueAfterDur, err := time.ParseDuration(requeueAfter)
+					if err != nil {
+						log.Warnf("invalid requeue_after duration: %s", requeueAfter)
+					} else {
+						log.Debugf("requeueing object after %s", requeueAfter)
+						resp.RequeueAfter = requeueAfterDur
+					}
+				}
+				return nil
+			})
 		}
 
 		return resp, nil
