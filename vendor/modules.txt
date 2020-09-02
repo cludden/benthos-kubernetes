@@ -355,6 +355,7 @@ github.com/olivere/elastic/v7/aws/v4
 github.com/olivere/elastic/v7/config
 github.com/olivere/elastic/v7/uritemplates
 # github.com/opentracing/opentracing-go v1.2.0
+## explicit
 github.com/opentracing/opentracing-go
 github.com/opentracing/opentracing-go/ext
 github.com/opentracing/opentracing-go/log

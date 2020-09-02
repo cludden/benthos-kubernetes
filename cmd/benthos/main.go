@@ -5,6 +5,7 @@ import (
 
 	_ "github.com/cludden/benthos-kubernetes/input"
 	_ "github.com/cludden/benthos-kubernetes/output"
+	_ "github.com/cludden/benthos-kubernetes/processor"
 )
 
 //------------------------------------------------------------------------------

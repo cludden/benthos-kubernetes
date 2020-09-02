@@ -40,7 +40,8 @@ output:
             - log:
                 message: adding finalizer...
 
-      - output:
+      - fallthrough: true
+        output:
           type: kubernetes_status
           plugin: {}
           processors:
@@ -55,6 +56,49 @@ output:
                 }
             - log:
                 message: updating status...
+
+      - output:
+          type: kubernetes
+          plugin: {}
+          processors:
+            - branch:
+                request_map: |
+                  root = {
+                    "apiVersion": "example.com/v1",
+                    "kind": "Bar",
+                    "metadata": {
+                      "name": metadata.name,
+                      "namespace": metadata.namespace
+                    }
+                  }
+                processors:
+                  - type: kubernetes
+                    plugin:
+                      operator: get
+                result_map: |
+                  root.bar = if errored() {
+                    throw(error())
+                  } else {
+                    this
+                  }
+
+            - log:
+                message: reconciling bar
+
+            - bloblang: |
+                let ownerRef = {
+                  "apiVersion": apiVersion,
+                  "controller": true,
+                  "blockOwnerDeletion": true,
+                  "kind": kind,
+                  "name": metadata.name,
+                  "uid": metadata.uid
+                }
+
+                root = bar
+                root.metadata.labels = metadata.labels
+                root.metadata.ownerReferences = [$ownerRef]
+                root.spec.size = spec.size
 
 logger:
   level: info
