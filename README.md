@@ -19,7 +19,10 @@ a collections of [benthos](https://github.com/Jeffail/benthos) plugins for integ
 
 - with Docker
   ```shell
-  $ docker run cludden/benthos-kubernetes -h
+  $ docker run cludden/benthos-kubernetes \
+    --list-input-plugins \
+    --list-output-plugins \
+    --list-processor-plugins
   ```
 - download a [release](https://github.com/cludden/benthos-kubernetes/releases)
 - as a benthos [plugin](./cmd/benthos/main.go)
