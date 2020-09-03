@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/output"
 	"github.com/Jeffail/benthos/v3/lib/types"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -152,7 +154,22 @@ func (k *Kubernetes) WriteWithContext(ctx context.Context, msg types.Message) er
 
 		switch {
 		case p.Metadata().Get("deleted") != "":
-			if err := k.client.Delete(ctx, &u); err != nil {
+			var opts []client.DeleteOption
+
+			var policy metav1.DeletionPropagation
+			switch strings.ToLower(p.Metadata().Get("deletion_propagation")) {
+			case "orphan":
+				policy = metav1.DeletePropagationOrphan
+			case "foreground":
+				policy = metav1.DeletePropagationBackground
+			default:
+				policy = metav1.DeletePropagationBackground
+			}
+			opts = append(opts, &client.DeleteOptions{
+				PropagationPolicy: &policy,
+			})
+
+			if err := k.client.Delete(ctx, &u, opts...); err != nil {
 				return fmt.Errorf("error deleting object: %v", err)
 			}
 		case string(u.GetUID()) != "":
