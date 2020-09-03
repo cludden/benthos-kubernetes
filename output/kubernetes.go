@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -43,13 +42,15 @@ This plugin creates, updates, or deletes kubernetes object.`,
 
 // KubernetesConfig defines runtime configuration for a kubernetes output
 type KubernetesConfig struct {
-	MaxInFlight int `json:"max_in_flight" yaml:"max_in_flight"`
+	DeletionPropagation metav1.DeletionPropagation `json:"deletion_propagation" yaml:"deletion_propagation"`
+	MaxInFlight         int                        `json:"max_in_flight" yaml:"max_in_flight"`
 }
 
 // NewKubernetesConfig returns a new KubernetesConfig value with sensible defaults
 func NewKubernetesConfig() interface{} {
 	return &KubernetesConfig{
-		MaxInFlight: 1,
+		DeletionPropagation: metav1.DeletePropagationBackground,
+		MaxInFlight:         1,
 	}
 }
 
@@ -86,6 +87,8 @@ func NewKubernetes(
 type Kubernetes struct {
 	client client.Client
 
+	deletionPropagation metav1.DeletionPropagation
+
 	log   log.Modular
 	stats metrics.Type
 
@@ -100,8 +103,14 @@ func NewKubernetesWriter(
 	stats metrics.Type,
 ) (*Kubernetes, error) {
 	k := &Kubernetes{
-		log:   log,
-		stats: stats,
+		deletionPropagation: conf.DeletionPropagation,
+		log:                 log,
+		stats:               stats,
+	}
+	switch k.deletionPropagation {
+	case metav1.DeletePropagationBackground, metav1.DeletePropagationForeground, metav1.DeletePropagationOrphan:
+	default:
+		return nil, fmt.Errorf("invalid deletion propagation policy: %s", k.deletionPropagation)
 	}
 	return k, nil
 }
@@ -156,15 +165,16 @@ func (k *Kubernetes) WriteWithContext(ctx context.Context, msg types.Message) er
 		case p.Metadata().Get("deleted") != "":
 			var opts []client.DeleteOption
 
-			var policy metav1.DeletionPropagation
-			switch strings.ToLower(p.Metadata().Get("deletion_propagation")) {
-			case "orphan":
-				policy = metav1.DeletePropagationOrphan
-			case "foreground":
-				policy = metav1.DeletePropagationBackground
-			default:
-				policy = metav1.DeletePropagationBackground
+			policy := k.deletionPropagation
+			if msgPolicy := metav1.DeletionPropagation(p.Metadata().Get("deletion_propagation")); string(msgPolicy) != "" {
+				switch msgPolicy {
+				case metav1.DeletePropagationBackground, metav1.DeletePropagationForeground, metav1.DeletePropagationOrphan:
+					policy = msgPolicy
+				default:
+					return fmt.Errorf("invalid deletion propagation policy: %s", msgPolicy)
+				}
 			}
+
 			opts = append(opts, &client.DeleteOptions{
 				PropagationPolicy: &policy,
 			})
