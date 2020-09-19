@@ -8,6 +8,12 @@ import (
 //------------------------------------------------------------------------------
 
 func methodWithDynamicArgs(args []interface{}, target Function, ctor MethodCtor) Function {
+	fns := []Function{target}
+	for _, dArg := range args {
+		if fArg, isDyn := dArg.(Function); isDyn {
+			fns = append(fns, fArg)
+		}
+	}
 	return ClosureFunction(func(ctx FunctionContext) (interface{}, error) {
 		dynArgs := make([]interface{}, 0, len(args))
 		for i, dArg := range args {
@@ -26,13 +32,17 @@ func methodWithDynamicArgs(args []interface{}, target Function, ctor MethodCtor)
 			return nil, err
 		}
 		return dynFunc.Exec(ctx)
-	}, target.QueryTargets)
+
+	}, aggregateTargetPaths(fns...))
 }
 
 func enableMethodDynamicArgs(fn MethodCtor) MethodCtor {
 	return func(target Function, args ...interface{}) (Function, error) {
-		for _, arg := range args {
-			if _, isDyn := arg.(Function); isDyn {
+		for i, arg := range args {
+			switch t := arg.(type) {
+			case *Literal:
+				args[i] = t.Value
+			case Function:
 				return methodWithDynamicArgs(args, target, fn), nil
 			}
 		}

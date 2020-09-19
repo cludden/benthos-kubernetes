@@ -22,27 +22,27 @@ allows you to run the same configured input resource in multiple places.`,
 Resource inputs also have the advantage of name based metrics and logging. For
 example, the config:
 
-` + "``` yaml" + `
+` + "```yaml" + `
 input:
   broker:
     inputs:
-    - kafka_balanced:
-        addresses: [ TODO ]
-        topics: [ foo ]
-        consumer_group: foogroup
-    - gcp_pubsub:
-        project: bar
-        subscription: baz
+      - kafka_balanced:
+          addresses: [ TODO ]
+          topics: [ foo ]
+          consumer_group: foogroup
+      - gcp_pubsub:
+          project: bar
+          subscription: baz
 ` + "```" + `
 
 Is equivalent to:
 
-` + "``` yaml" + `
+` + "```yaml" + `
 input:
   broker:
     inputs:
-    - resource: foo
-    - resource: bar
+      - resource: foo
+      - resource: bar
 
 resources:
   inputs:
@@ -61,6 +61,9 @@ resources:
 But now the metrics path of Kafka input will be
 ` + "`resources.inputs.foo`" + `, this way of flattening observability
 labels becomes more useful as configs get larger and more nested.`,
+		Categories: []Category{
+			CategoryUtility,
+		},
 	}
 }
 

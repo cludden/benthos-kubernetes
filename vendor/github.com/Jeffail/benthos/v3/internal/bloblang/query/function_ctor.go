@@ -39,6 +39,12 @@ func (f closureFunction) QueryTargets(ctx TargetsContext) []TargetPath {
 //------------------------------------------------------------------------------
 
 func withDynamicArgs(args []interface{}, fn FunctionCtor) Function {
+	fns := []Function{}
+	for _, dArg := range args {
+		if fArg, isDyn := dArg.(Function); isDyn {
+			fns = append(fns, fArg)
+		}
+	}
 	return ClosureFunction(func(ctx FunctionContext) (interface{}, error) {
 		dynArgs := make([]interface{}, 0, len(args))
 		for i, dArg := range args {
@@ -57,13 +63,16 @@ func withDynamicArgs(args []interface{}, fn FunctionCtor) Function {
 			return nil, err
 		}
 		return dynFunc.Exec(ctx)
-	}, nil)
+	}, aggregateTargetPaths(fns...))
 }
 
 func enableDynamicArgs(fn FunctionCtor) FunctionCtor {
 	return func(args ...interface{}) (Function, error) {
-		for _, arg := range args {
-			if _, isDyn := arg.(Function); isDyn {
+		for i, arg := range args {
+			switch t := arg.(type) {
+			case *Literal:
+				args[i] = t.Value
+			case Function:
 				return withDynamicArgs(args, fn), nil
 			}
 		}
@@ -102,6 +111,20 @@ func ExpectOneOrZeroArgs() ArgCheckFn {
 	return func(args []interface{}) error {
 		if len(args) > 1 {
 			return fmt.Errorf("expected one or zero arguments, received: %v", len(args))
+		}
+		return nil
+	}
+}
+
+// ExpectBetweenNAndMArgs returns an error unless between N and M arguments are
+// specified.
+func ExpectBetweenNAndMArgs(n, m int) ArgCheckFn {
+	return func(args []interface{}) error {
+		if len(args) < n {
+			return fmt.Errorf("expected at least %v arguments, received: %v", n, len(args))
+		}
+		if len(args) > m {
+			return fmt.Errorf("expected fewer than %v arguments, received: %v", m, len(args))
 		}
 		return nil
 	}
@@ -209,22 +232,7 @@ type FunctionCtor func(args ...interface{}) (Function, error)
 
 // RegisterFunction to be accessible from Bloblang queries. Returns an empty
 // struct in order to allow inline calls.
-func RegisterFunction(name string, allowDynamicArgs bool, ctor FunctionCtor, checks ...ArgCheckFn) struct{} {
-	if len(checks) > 0 {
-		ctor = checkArgs(ctor, checks...)
-	}
-	if allowDynamicArgs {
-		ctor = enableDynamicArgs(ctor)
-	}
-	if _, exists := functions[name]; exists {
-		panic(fmt.Sprintf("Conflicting function name: %v", name))
-	}
-	functions[name] = ctor
-	return struct{}{}
-}
-
-// RegisterFunctionSpec TODO
-func RegisterFunctionSpec(spec FunctionSpec, allowDynamicArgs bool, ctor FunctionCtor, checks ...ArgCheckFn) struct{} {
+func RegisterFunction(spec FunctionSpec, allowDynamicArgs bool, ctor FunctionCtor, checks ...ArgCheckFn) struct{} {
 	if len(checks) > 0 {
 		ctor = checkArgs(ctor, checks...)
 	}

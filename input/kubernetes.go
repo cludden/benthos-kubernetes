@@ -314,6 +314,8 @@ func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconcile
 
 		u := unstructured.Unstructured{}
 		u.SetGroupVersionKind(gvk)
+		u.SetNamespace(req.Namespace)
+		u.SetName(req.Name)
 
 		if err := k.mgr.GetCache().Get(context.Background(), req.NamespacedName, &u); err != nil {
 			if err := client.IgnoreNotFound(err); err != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Jeffail/benthos/v3/internal/bloblang"
+	"github.com/Jeffail/benthos/v3/internal/bloblang/mapping"
 	"github.com/Jeffail/benthos/v3/internal/bloblang/parser"
 	"github.com/Jeffail/benthos/v3/internal/bloblang/query"
 	"github.com/Jeffail/benthos/v3/lib/log"
@@ -49,7 +50,7 @@ func NewBloblangConfig() BloblangConfig {
 
 // Bloblang is a condition that checks message against a Bloblang query.
 type Bloblang struct {
-	fn query.Function
+	fn *mapping.Executor
 
 	log log.Modular
 
@@ -63,7 +64,7 @@ type Bloblang struct {
 func NewBloblang(
 	conf Config, mgr types.Manager, log log.Modular, stats metrics.Type,
 ) (Type, error) {
-	fn, err := bloblang.NewQuery(string(conf.Bloblang))
+	fn, err := bloblang.NewMapping("", string(conf.Bloblang))
 	if err != nil {
 		if perr, ok := err.(*parser.Error); ok {
 			return nil, fmt.Errorf("%v", perr.ErrorAtPosition([]rune(conf.Bloblang)))
@@ -89,12 +90,21 @@ func (c *Bloblang) Check(msg types.Message) bool {
 	c.mCount.Incr(1)
 
 	var valuePtr *interface{}
-	if jObj, err := msg.Get(0).JSON(); err == nil {
-		valuePtr = &jObj
+	var parseErr error
+
+	lazyValue := func() *interface{} {
+		if valuePtr == nil && parseErr == nil {
+			if jObj, err := msg.Get(0).JSON(); err == nil {
+				valuePtr = &jObj
+			} else {
+				parseErr = err
+			}
+		}
+		return valuePtr
 	}
 
 	result, err := c.fn.Exec(query.FunctionContext{
-		Value:    valuePtr,
+		Value:    lazyValue,
 		Maps:     map[string]query.Function{},
 		Vars:     map[string]interface{}{},
 		MsgBatch: msg,

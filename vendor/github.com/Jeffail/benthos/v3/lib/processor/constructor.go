@@ -39,24 +39,18 @@ type TypeSpec struct {
 	) (Type, error)
 	sanitiseConfigFunc func(conf Config) (interface{}, error)
 
-	Summary     string
-	Description string
-	Footnotes   string
-
-	Categories []Category
-
 	// UsesBatches indicates whether this processors functionality is best
 	// applied on messages that are already batched.
 	UsesBatches bool
 
-	Beta bool
-
-	// Deprecated indicates whether this component is deprecated.
-	Deprecated bool
-
-	Examples []docs.AnnotatedExample
-
-	FieldSpecs docs.FieldSpecs
+	Summary     string
+	Description string
+	Categories  []Category
+	Footnotes   string
+	FieldSpecs  docs.FieldSpecs
+	Examples    []docs.AnnotatedExample
+	Beta        bool
+	Deprecated  bool
 }
 
 // Constructors is a map of all processor types with their specs.
@@ -116,6 +110,7 @@ const (
 	TypeHTTP         = "http"
 	TypeInsertPart   = "insert_part"
 	TypeJMESPath     = "jmespath"
+	TypeJQ           = "jq"
 	TypeJSON         = "json"
 	TypeJSONSchema   = "json_schema"
 	TypeLambda       = "lambda"
@@ -183,6 +178,7 @@ type Config struct {
 	HTTP         HTTPConfig         `json:"http" yaml:"http"`
 	InsertPart   InsertPartConfig   `json:"insert_part" yaml:"insert_part"`
 	JMESPath     JMESPathConfig     `json:"jmespath" yaml:"jmespath"`
+	JQ           JQConfig           `json:"jq" yaml:"jq"`
 	JSON         JSONConfig         `json:"json" yaml:"json"`
 	JSONSchema   JSONSchemaConfig   `json:"json_schema" yaml:"json_schema"`
 	Lambda       LambdaConfig       `json:"lambda" yaml:"lambda"`
@@ -249,6 +245,7 @@ func NewConfig() Config {
 		HTTP:         NewHTTPConfig(),
 		InsertPart:   NewInsertPartConfig(),
 		JMESPath:     NewJMESPathConfig(),
+		JQ:           NewJQConfig(),
 		JSON:         NewJSONConfig(),
 		JSONSchema:   NewJSONSchemaConfig(),
 		Lambda:       NewLambdaConfig(),

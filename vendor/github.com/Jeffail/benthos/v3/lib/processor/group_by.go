@@ -1,10 +1,14 @@
 package processor
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/Jeffail/benthos/v3/internal/bloblang"
+	"github.com/Jeffail/benthos/v3/internal/bloblang/mapping"
+	"github.com/Jeffail/benthos/v3/internal/docs"
 	"github.com/Jeffail/benthos/v3/lib/condition"
 	"github.com/Jeffail/benthos/v3/lib/log"
 	"github.com/Jeffail/benthos/v3/lib/message"
@@ -12,6 +16,7 @@ import (
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/response"
 	"github.com/Jeffail/benthos/v3/lib/types"
+	"github.com/google/go-cmp/cmp"
 	olog "github.com/opentracing/opentracing-go/log"
 )
 
@@ -24,88 +29,77 @@ func init() {
 			CategoryComposition,
 		},
 		Summary: `
-Splits a batch of messages into N batches, where each resulting batch contains a
-group of messages determined by conditions that are applied per message of the
-original batch.`,
+Splits a [batch of messages](/docs/configuration/batching/) into N batches, where each resulting batch contains a group of messages determined by a [Bloblang query](/docs/guides/bloblang/about/).`,
 		Description: `
-Once the groups are established a list of processors are applied to their
-respective grouped batch, which can be used to label the batch as per their
-grouping.
-
-Each group is configured in a list with a condition and a list of processors:
-
-` + "``` yaml" + `
-group_by:
-- condition:
-    static: true
-  processors:
-  - type: noop
-` + "```" + `
-
-Messages are added to the first group that passes and can only belong to a
-single group. Messages that do not pass the conditions of any group are placed
-in a final batch with no processors applied.`,
-		Footnotes: `
-## Examples
-
-Imagine we have a batch of messages that we wish to split into two groups - the
-foos and the bars - which should be sent to different output destinations based
-on those groupings. We also need to send the foos as a tar gzip archive. For
-this purpose we can use the ` + "`group_by`" + ` processor with a
-` + "[`switch`](/docs/components/outputs/switch)" + ` output:
-
-` + "```yaml" + `
+Once the groups are established a list of processors are applied to their respective grouped batch, which can be used to label the batch as per their grouping. Messages that do not pass the check of any specified group are placed in their own group.`,
+		Examples: []docs.AnnotatedExample{
+			{
+				Title:   "Grouped Processing",
+				Summary: "Imagine we have a batch of messages that we wish to split into a group of foos and everything else, which should be sent to different output destinations based on those groupings. We also need to send the foos as a tar gzip archive. For this purpose we can use the `group_by` processor with a [`switch`](/docs/components/outputs/switch) output:",
+				Config: `
 pipeline:
   processors:
-  - group_by:
-    - condition:
-        text:
-          operator: contains
-          arg: "this is a foo"
-      processors:
-      - archive:
-          format: tar
-      - compress:
-          algorithm: gzip
-      - metadata:
-          operator: set
-          key: grouping
-          value: foo
+    - group_by:
+      - check: content().contains("this is a foo")
+        processors:
+          - archive:
+              format: tar
+          - compress:
+              algorithm: gzip
+          - bloblang: 'meta grouping = "foo"'
+
 output:
   switch:
-    outputs:
-    - output:
-        type: foo_output
-      condition:
-        metadata:
-          operator: equals
-          key: grouping
-          arg: foo
-    - output:
-        type: bar_output
-` + "```" + `
-
-Since any message that isn't a foo is a bar, and bars do not require their own
-processing steps, we only need a single grouping configuration.`,
+    cases:
+      - check: meta("grouping") == "foo"
+        output:
+          gcp_pubsub:
+            project: foo_prod
+            topic: only_the_foos
+      - output:
+          gcp_pubsub:
+            project: somewhere_else
+            topic: no_foos_here
+`,
+			},
+		},
+		FieldSpecs: docs.FieldSpecs{
+			docs.FieldCommon(
+				"check",
+				"A [Bloblang query](/docs/guides/bloblang/about/) that should return a boolean value indicating whether a message belongs to a given group.",
+				`this.type == "foo"`,
+				`this.contents.urls.contains("https://benthos.dev/")`,
+				`true`,
+			).HasDefault(""),
+			docs.FieldDeprecated("condition"),
+			docs.FieldCommon(
+				"processors",
+				"A list of [processors](/docs/components/processors/about/) to execute on the newly formed group.",
+			).HasDefault([]interface{}{}),
+		},
 		sanitiseConfigFunc: func(conf Config) (interface{}, error) {
 			groups := []interface{}{}
 			for _, g := range conf.GroupBy {
-				condSanit, err := condition.SanitiseConfig(g.Condition)
-				if err != nil {
-					return nil, err
-				}
 				procsSanit := []interface{}{}
 				for _, p := range g.Processors {
-					var procSanit interface{}
-					if procSanit, err = SanitiseConfig(p); err != nil {
+					procSanit, err := SanitiseConfig(p)
+					if err != nil {
 						return nil, err
 					}
 					procsSanit = append(procsSanit, procSanit)
 				}
-				groups = append(groups, map[string]interface{}{
-					"condition":  condSanit,
+				groupSanit := map[string]interface{}{
 					"processors": procsSanit,
-				})
+					"check":      g.Check,
+				}
+				if !isDefaultGroupCond(g.Condition) {
+					condSanit, err := condition.SanitiseConfig(g.Condition)
+					if err != nil {
+						return nil, err
+					}
+					groupSanit["condition"] = condSanit
+				}
+				groups = append(groups, groupSanit)
 			}
 			return groups, nil
 		},
@@ -115,10 +109,18 @@ processing steps, we only need a single grouping configuration.`,
 
 //------------------------------------------------------------------------------
 
+func isDefaultGroupCond(cond condition.Config) bool {
+	if cond.Type == "" {
+		return true
+	}
+	return cmp.Equal(cond, condition.NewConfig())
+}
+
 // GroupByElement represents a group determined by a condition and a list of
 // group specific processors.
 type GroupByElement struct {
 	Condition  condition.Config `json:"condition" yaml:"condition"`
+	Check      string           `json:"check" yaml:"check"`
 	Processors []Config         `json:"processors" yaml:"processors"`
 }
 
@@ -138,6 +140,7 @@ func NewGroupByConfig() GroupByConfig {
 
 type group struct {
 	Condition  condition.Type
+	Check      *mapping.Executor
 	Processors []types.Processor
 }
 
@@ -168,12 +171,29 @@ func NewGroupBy(
 		nsLog := log.NewModule("." + groupPrefix)
 		nsStats := metrics.Namespaced(stats, groupPrefix)
 
-		if groups[i].Condition, err = condition.New(
-			gConf.Condition, mgr,
-			nsLog.NewModule(".condition"), metrics.Namespaced(nsStats, "condition"),
-		); err != nil {
-			return nil, fmt.Errorf("failed to create condition for group '%v': %v", i, err)
+		if !isDefaultGroupCond(gConf.Condition) {
+			if groups[i].Condition, err = condition.New(
+				gConf.Condition, mgr,
+				nsLog.NewModule(".condition"), metrics.Namespaced(nsStats, "condition"),
+			); err != nil {
+				return nil, fmt.Errorf("failed to create condition for group '%v': %v", i, err)
+			}
 		}
+
+		if len(gConf.Check) > 0 {
+			if groups[i].Check, err = bloblang.NewMapping("", gConf.Check); err != nil {
+				return nil, fmt.Errorf("failed to parse check for group '%v': %v", i, err)
+			}
+		}
+
+		if groups[i].Check == nil && groups[i].Condition == nil {
+			return nil, errors.New("a group definition must have a check query")
+		}
+
+		if groups[i].Check != nil && groups[i].Condition != nil {
+			return nil, errors.New("cannot specify both a condition and a check in a group")
+		}
+
 		for j, pConf := range gConf.Processors {
 			prefix := fmt.Sprintf("processor.%v", j)
 			var proc Type
@@ -224,16 +244,35 @@ func (g *GroupBy) ProcessMessage(msg types.Message) ([]types.Message, types.Resp
 
 	msg.Iter(func(i int, p types.Part) error {
 		for j, group := range g.groups {
-			if group.Condition.Check(message.Lock(msg, i)) {
-				groupStr := strconv.Itoa(j)
-				spans[i].LogFields(
-					olog.String("event", "grouped"),
-					olog.String("type", groupStr),
-				)
-				spans[i].SetTag("group", groupStr)
-				groups[j].Append(p.Copy())
-				g.mGroupPass[j].Incr(1)
-				return nil
+			if group.Condition != nil {
+				if group.Condition.Check(message.Lock(msg, i)) {
+					groupStr := strconv.Itoa(j)
+					spans[i].LogFields(
+						olog.String("event", "grouped"),
+						olog.String("type", groupStr),
+					)
+					spans[i].SetTag("group", groupStr)
+					groups[j].Append(p.Copy())
+					g.mGroupPass[j].Incr(1)
+					return nil
+				}
+			} else if group.Check != nil {
+				res, err := group.Check.QueryPart(i, msg)
+				if err != nil {
+					res = false
+					g.log.Errorf("Failed to test group %v: %v\n", j, err)
+				}
+				if res {
+					groupStr := strconv.Itoa(j)
+					spans[i].LogFields(
+						olog.String("event", "grouped"),
+						olog.String("type", groupStr),
+					)
+					spans[i].SetTag("group", groupStr)
+					groups[j].Append(p.Copy())
+					g.mGroupPass[j].Incr(1)
+					return nil
+				}
 			}
 		}
 

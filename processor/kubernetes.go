@@ -11,6 +11,7 @@ import (
 	"github.com/Jeffail/benthos/v3/lib/processor"
 	"github.com/Jeffail/benthos/v3/lib/types"
 	"github.com/opentracing/opentracing-go"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
@@ -39,7 +40,7 @@ func init() {
 	)
 	processor.DocumentPlugin(
 		"kubernetes",
-		`Performs operations against a Kubernetes cluster.`,
+		`Performs CRUD operations for Kubernetes objects.`,
 		nil,
 	)
 }
@@ -48,22 +49,28 @@ func init() {
 
 // KubernetesConfig defines runtime configuration for a Kubernetes processor
 type KubernetesConfig struct {
-	Operator string `json:"operator" yaml:"operator"`
-	Parts    []int  `json:"parts" yaml:"parts"`
+	Operator            string                     `json:"operator" yaml:"operator"`
+	DeletionPropagation metav1.DeletionPropagation `json:"deletion_propagation" yaml:"deletion_propagation"`
+	Parts               []int                      `json:"parts" yaml:"parts"`
 }
 
 // NewKubernetesConfig creates a new KubernetesConfig with default values
 func NewKubernetesConfig() *KubernetesConfig {
-	return &KubernetesConfig{}
+	return &KubernetesConfig{
+		Operator:            "get",
+		DeletionPropagation: metav1.DeletePropagationBackground,
+	}
 }
 
 //------------------------------------------------------------------------------
 
 // Kubernetes is a processor that reverses all messages.
 type Kubernetes struct {
-	client   client.Client
-	operator string
-	parts    []int
+	client client.Client
+
+	deletionPropagation metav1.DeletionPropagation
+	operator            string
+	parts               []int
 
 	log   log.Modular
 	stats metrics.Type
@@ -76,11 +83,18 @@ func NewKubernetes(
 	stats metrics.Type,
 ) (types.Processor, error) {
 	k := &Kubernetes{
-		operator: conf.Operator,
-		parts:    conf.Parts,
+		deletionPropagation: conf.DeletionPropagation,
+		operator:            conf.Operator,
+		parts:               conf.Parts,
 
 		log:   log,
 		stats: stats,
+	}
+
+	switch k.deletionPropagation {
+	case metav1.DeletePropagationBackground, metav1.DeletePropagationForeground, metav1.DeletePropagationOrphan:
+	default:
+		return nil, fmt.Errorf("invalid deletion propagation policy: %s", k.deletionPropagation)
 	}
 
 	// initalize controller manager
@@ -91,7 +105,7 @@ func NewKubernetes(
 	k.client = client
 
 	switch k.operator {
-	case "get", "create", "update", "delete":
+	case "get", "create", "update", "delete", "status":
 	default:
 		return nil, fmt.Errorf("unsupported operator: %s", k.operator)
 	}
@@ -114,9 +128,9 @@ func (k *Kubernetes) ProcessMessage(msg types.Message) ([]types.Message, types.R
 		var err error
 		switch k.operator {
 		case "get":
-			key, err := client.ObjectKeyFromObject(&u)
+			key, perr := client.ObjectKeyFromObject(&u)
 			if err != nil {
-				err = fmt.Errorf("failed to get object: failed to get object key from object: %v", err)
+				err = fmt.Errorf("failed to get object: failed to get object key from object: %v", perr)
 				break
 			}
 			if err = k.client.Get(ctx, key, &u); err != nil {
@@ -131,8 +145,28 @@ func (k *Kubernetes) ProcessMessage(msg types.Message) ([]types.Message, types.R
 				err = fmt.Errorf("failed to update object: %v", err)
 			}
 		case "delete":
-			if err = k.client.Delete(ctx, &u); err != nil {
-				err = fmt.Errorf("failed to update object: %v", err)
+			var opts []client.DeleteOption
+
+			policy := k.deletionPropagation
+			if msgPolicy := metav1.DeletionPropagation(part.Metadata().Get("deletion_propagation")); string(msgPolicy) != "" {
+				switch msgPolicy {
+				case metav1.DeletePropagationBackground, metav1.DeletePropagationForeground, metav1.DeletePropagationOrphan:
+					policy = msgPolicy
+				default:
+					return fmt.Errorf("invalid deletion propagation policy: %s", msgPolicy)
+				}
+			}
+
+			opts = append(opts, &client.DeleteOptions{
+				PropagationPolicy: &policy,
+			})
+
+			if err = k.client.Delete(ctx, &u, opts...); err != nil {
+				err = fmt.Errorf("failed to delete object: %v", err)
+			}
+		case "status":
+			if err = k.client.Status().Update(ctx, &u); err != nil {
+				err = fmt.Errorf("failed to update object status: %v", err)
 			}
 		}
 		if err != nil {

@@ -9,4 +9,4 @@ performs operations against a kubernetes cluster
 specifies the kubernetes client operation to perform
 
 Type: `string`
-Options: `create`, `datele`, `get`, `update`
+Options: `create`, `delete`, `get`, `update`

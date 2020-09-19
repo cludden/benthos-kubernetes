@@ -80,6 +80,70 @@ func (e *Executor) Maps() map[string]query.Function {
 	return e.maps
 }
 
+// QueryPart executes the bloblang mapping on a particular message index of a
+// batch. The message is parsed as a JSON document in order to provide the
+// mapping context. The result of the mapping is expected to be a boolean value
+// at the root, this is not the case, or if any stage of the mapping fails to
+// execute, an error is returned.
+func (e *Executor) QueryPart(index int, msg Message) (bool, error) {
+	var valuePtr *interface{}
+	var parseErr error
+
+	lazyValue := func() *interface{} {
+		if valuePtr == nil && parseErr == nil {
+			if jObj, err := msg.Get(index).JSON(); err == nil {
+				valuePtr = &jObj
+			} else {
+				parseErr = err
+			}
+		}
+		return valuePtr
+	}
+
+	var newValue interface{} = query.Nothing(nil)
+	vars := map[string]interface{}{}
+
+	for _, stmt := range e.statements {
+		res, err := stmt.query.Exec(query.FunctionContext{
+			Maps:     e.maps,
+			Value:    lazyValue,
+			Vars:     vars,
+			Index:    index,
+			MsgBatch: msg,
+		})
+		if err != nil {
+			var line int
+			if len(e.input) > 0 && len(stmt.input) > 0 {
+				line, _ = LineAndColOf(e.input, stmt.input)
+			}
+			if parseErr != nil && errors.Is(err, query.ErrNoContext) {
+				err = fmt.Errorf("failed to parse message as JSON: %w", parseErr)
+			}
+			return false, fmt.Errorf("failed to execute mapping query at line %v: %w", line, err)
+		}
+		if _, isNothing := res.(query.Nothing); isNothing {
+			// Skip assignment entirely
+			continue
+		}
+		if err = stmt.assignment.Apply(res, AssignmentContext{
+			Maps:  e.maps,
+			Vars:  vars,
+			Value: &newValue,
+		}); err != nil {
+			var line int
+			if len(e.input) > 0 && len(stmt.input) > 0 {
+				line, _ = LineAndColOf(e.input, stmt.input)
+			}
+			return false, fmt.Errorf("failed to assign query result at line %v: %w", line, err)
+		}
+	}
+
+	if b, ok := newValue.(bool); ok {
+		return b, nil
+	}
+	return false, query.NewTypeError(newValue, query.ValueBool)
+}
+
 // MapPart executes the bloblang mapping on a particular message index of a
 // batch. The message is parsed as a JSON document in order to provide the
 // mapping context. Returns an error if any stage of the mapping fails to
@@ -104,10 +168,16 @@ func (e *Executor) MapOnto(part types.Part, index int, msg Message) (types.Part,
 func (e *Executor) mapPart(appendTo types.Part, index int, reference Message) (types.Part, error) {
 	var valuePtr *interface{}
 	var parseErr error
-	if jObj, err := reference.Get(index).JSON(); err == nil {
-		valuePtr = &jObj
-	} else {
-		parseErr = err
+
+	lazyValue := func() *interface{} {
+		if valuePtr == nil && parseErr == nil {
+			if jObj, err := reference.Get(index).JSON(); err == nil {
+				valuePtr = &jObj
+			} else {
+				parseErr = err
+			}
+		}
+		return valuePtr
 	}
 
 	var newPart types.Part
@@ -129,7 +199,7 @@ func (e *Executor) mapPart(appendTo types.Part, index int, reference Message) (t
 	for _, stmt := range e.statements {
 		res, err := stmt.query.Exec(query.FunctionContext{
 			Maps:     e.maps,
-			Value:    valuePtr,
+			Value:    lazyValue,
 			Vars:     vars,
 			Index:    index,
 			MsgBatch: reference,
