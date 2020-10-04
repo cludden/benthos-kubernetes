@@ -8,7 +8,7 @@ import (
 
 //------------------------------------------------------------------------------
 
-func arithmeticOpParser() Type {
+func arithmeticOpParser() Func {
 	opParser := OneOf(
 		Char('+'),
 		Char('-'),
@@ -60,16 +60,16 @@ func arithmeticOpParser() Type {
 		case "|":
 			res.Payload = query.ArithmeticPipe
 		default:
-			return Result{
-				Remaining: input,
-				Err:       NewFatalError(input, fmt.Errorf("operator not recognized: %v", res.Payload)),
-			}
+			return Fail(
+				NewFatalError(input, fmt.Errorf("operator not recognized: %v", res.Payload)),
+				input,
+			)
 		}
 		return res
 	}
 }
 
-func arithmeticParser(fnParser Type) Type {
+func arithmeticParser(fnParser Func) Func {
 	whitespace := DiscardAll(
 		OneOf(
 			SpacesAndTabs(),
@@ -112,10 +112,10 @@ func arithmeticParser(fnParser Type) Type {
 						query.ArithmeticSub,
 					},
 				); err != nil {
-					return Result{
-						Err:       NewFatalError(input, err),
-						Remaining: input,
-					}
+					return Fail(
+						NewFatalError(input, err),
+						input,
+					)
 				}
 			}
 			fns = append(fns, fn)
@@ -126,15 +126,12 @@ func arithmeticParser(fnParser Type) Type {
 
 		fn, err := query.NewArithmeticExpression(fns, ops)
 		if err != nil {
-			return Result{
-				Err:       NewFatalError(input, err),
-				Remaining: input,
-			}
+			return Fail(
+				NewFatalError(input, err),
+				input,
+			)
 		}
-		return Result{
-			Payload:   fn,
-			Remaining: res.Remaining,
-		}
+		return Success(fn, res.Remaining)
 	}
 }
 

@@ -9,13 +9,3 @@ metadata:
     - random
 spec:
   size: 1
-
----
-apiVersion: example.com/v1
-kind: Bar
-metadata:
-  name: three
-  labels:
-    color: blue
-spec:
-  size: 3

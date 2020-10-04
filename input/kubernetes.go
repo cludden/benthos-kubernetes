@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Jeffail/benthos/v3/lib/bloblang"
 	"github.com/Jeffail/benthos/v3/lib/input"
 	"github.com/Jeffail/benthos/v3/lib/log"
 	"github.com/Jeffail/benthos/v3/lib/message"
@@ -56,12 +57,26 @@ This plugin streams changes to kubernetes objects from a given cluster.`,
 
 // KubernetesConfig defines runtime configuration for a kubernetes input
 type KubernetesConfig struct {
-	Watches []Watch `json:"watches,omitempty" yaml:"watches,omitempty"`
+	Result  KubernetesResultConfig `json:"result" yaml:"result"`
+	Watches []Watch                `json:"watches,omitempty" yaml:"watches,omitempty"`
 }
 
 // NewKubernetesConfig creates a new KubernetesConfig with default values
 func NewKubernetesConfig() *KubernetesConfig {
-	return &KubernetesConfig{}
+	return &KubernetesConfig{
+		Result: NewKubernetesResultConfig(),
+	}
+}
+
+// KubernetesResultConfig provides config fields for customing the result
+type KubernetesResultConfig struct {
+	Requeue      string `json:"requeue" yaml:"requeue"`
+	RequeueAfter string `json:"requeue_after" yaml:"requeue_after"`
+}
+
+// NewKubernetesResultConfig returns a KubernetesResultConfig with default values
+func NewKubernetesResultConfig() KubernetesResultConfig {
+	return KubernetesResultConfig{}
 }
 
 // Watch defines a controller configuration
@@ -204,6 +219,9 @@ type selectorRequirement struct {
 type Kubernetes struct {
 	mgr manager.Manager
 
+	requeue      bloblang.Mapping
+	requeueAfter bloblang.Field
+
 	resChan          chan types.Response
 	transactionsChan chan types.Transaction
 
@@ -232,6 +250,24 @@ func NewKubernetes(
 		transactionsChan: make(chan types.Transaction),
 		closeChan:        make(chan struct{}),
 		closedChan:       make(chan struct{}),
+	}
+
+	// check for result requeue mapping
+	if conf.Result.Requeue != "" {
+		requeue, err := bloblang.NewMapping(conf.Result.Requeue)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing result requeue mapping: %v", err)
+		}
+		c.requeue = requeue
+	}
+
+	// check for result requeue after expression
+	if conf.Result.RequeueAfter != "" {
+		requeueAfter, err := bloblang.NewField(conf.Result.RequeueAfter)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing result requeue_after expression: %v", err)
+		}
+		c.requeueAfter = requeueAfter
 	}
 
 	// initalize controller manager
@@ -358,10 +394,27 @@ func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconcile
 		case <-k.closeChan:
 		}
 
+		// combine result messages if more than one exist
+		result := message.New(nil)
 		for _, resMsg := range store.Get() {
 			resMsg.Iter(func(i int, part types.Part) error {
-				// check for requeue after metadata attribute
-				requeueAfter := part.Metadata().Get("requeue_after")
+				result.Append(part)
+				return nil
+			})
+		}
+
+		if result.Len() > 0 {
+			if k.requeue != nil {
+				requeue, err := k.requeue.QueryPart(0, result)
+				if err != nil {
+					log.Errorf("failed to check result requeue mapping: %v", err)
+				} else if requeue {
+					log.Debugln("requeueing object")
+					resp.Requeue = true
+				}
+			}
+			if k.requeueAfter != nil {
+				requeueAfter := k.requeueAfter.String(0, result)
 				if requeueAfter != "" {
 					requeueAfterDur, err := time.ParseDuration(requeueAfter)
 					if err != nil {
@@ -371,8 +424,7 @@ func (k *Kubernetes) Reconciler(gvk schema.GroupVersionKind) reconcile.Reconcile
 						resp.RequeueAfter = requeueAfterDur
 					}
 				}
-				return nil
-			})
+			}
 		}
 
 		return resp, nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/Jeffail/benthos/v3/lib/bloblang"
 	"github.com/Jeffail/benthos/v3/lib/log"
 	"github.com/Jeffail/benthos/v3/lib/metrics"
 	"github.com/Jeffail/benthos/v3/lib/processor"
@@ -49,8 +50,9 @@ func init() {
 
 // KubernetesConfig defines runtime configuration for a Kubernetes processor
 type KubernetesConfig struct {
-	Operator            string                     `json:"operator" yaml:"operator"`
 	DeletionPropagation metav1.DeletionPropagation `json:"deletion_propagation" yaml:"deletion_propagation"`
+	Operator            string                     `json:"operator" yaml:"operator"`
+	OperatorMapping     string                     `json:"operator_mapping" yaml:"operator_mapping"`
 	Parts               []int                      `json:"parts" yaml:"parts"`
 }
 
@@ -70,6 +72,7 @@ type Kubernetes struct {
 
 	deletionPropagation metav1.DeletionPropagation
 	operator            string
+	operatorMapping     bloblang.Mapping
 	parts               []int
 
 	log   log.Modular
@@ -97,18 +100,20 @@ func NewKubernetes(
 		return nil, fmt.Errorf("invalid deletion propagation policy: %s", k.deletionPropagation)
 	}
 
+	if conf.OperatorMapping != "" {
+		m, err := bloblang.NewMapping(conf.OperatorMapping)
+		if err != nil {
+			return nil, fmt.Errorf("error parsing operator field: %v", err)
+		}
+		k.operatorMapping = m
+	}
+
 	// initalize controller manager
 	client, err := client.New(config.GetConfigOrDie(), client.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("error initializing controller manager: %v", err)
 	}
 	k.client = client
-
-	switch k.operator {
-	case "get", "create", "update", "delete", "status":
-	default:
-		return nil, fmt.Errorf("unsupported operator: %s", k.operator)
-	}
 
 	return k, nil
 }
@@ -120,14 +125,25 @@ func (k *Kubernetes) ProcessMessage(msg types.Message) ([]types.Message, types.R
 	ctx := context.Background()
 
 	proc := func(index int, span opentracing.Span, part types.Part) error {
+		var err error
 		var u unstructured.Unstructured
 		if err := u.UnmarshalJSON(part.Get()); err != nil {
 			return fmt.Errorf("invalid message part, must be valid kubernetes runtime object: %v", err)
 		}
+		id := fmt.Sprintf("%s Namespace=%s Name=%s", u.GetObjectKind().GroupVersionKind().String(), u.GetNamespace(), u.GetName())
 
-		var err error
-		switch k.operator {
+		operator := k.operator
+		if k.operatorMapping != nil {
+			operatorB, err := k.operatorMapping.MapPart(index, msg)
+			if err != nil {
+				return fmt.Errorf("error evaluating operator mapping: %v", err)
+			}
+			operator = string(operatorB.Get())
+		}
+
+		switch operator {
 		case "get":
+			k.log.Debugf("getting kubernetes object: %s", id)
 			key, perr := client.ObjectKeyFromObject(&u)
 			if err != nil {
 				err = fmt.Errorf("failed to get object: failed to get object key from object: %v", perr)
@@ -137,14 +153,17 @@ func (k *Kubernetes) ProcessMessage(msg types.Message) ([]types.Message, types.R
 				err = fmt.Errorf("failed to get object: %v", err)
 			}
 		case "create":
+			k.log.Debugf("creating kubernetes object: %s", id)
 			if err = k.client.Create(ctx, &u); err != nil {
 				err = fmt.Errorf("failed to create object: %v", err)
 			}
 		case "update":
+			k.log.Debugf("updating kubernetes object: %s", id)
 			if err = k.client.Update(ctx, &u); err != nil {
 				err = fmt.Errorf("failed to update object: %v", err)
 			}
 		case "delete":
+			k.log.Debugf("deleting kubernetes object: %s", id)
 			var opts []client.DeleteOption
 
 			policy := k.deletionPropagation
@@ -165,10 +184,15 @@ func (k *Kubernetes) ProcessMessage(msg types.Message) ([]types.Message, types.R
 				err = fmt.Errorf("failed to delete object: %v", err)
 			}
 		case "status":
+			k.log.Debugf("updating kubernetes object status: %s", id)
 			if err = k.client.Status().Update(ctx, &u); err != nil {
 				err = fmt.Errorf("failed to update object status: %v", err)
 			}
+		default:
+			k.log.Errorf("unsupported operator: %s", operator)
+			return fmt.Errorf("unsupported operator: %s", operator)
 		}
+
 		if err != nil {
 			k.log.Errorf("failed to process message: %v", err)
 			return err

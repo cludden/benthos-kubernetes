@@ -8,7 +8,7 @@ import (
 
 //------------------------------------------------------------------------------
 
-func functionArgsParser(allowFunctions bool) Type {
+func functionArgsParser(allowFunctions bool) Func {
 	open, comma, close := Char('('), Char(','), Char(')')
 	whitespace := DiscardAll(
 		OneOf(
@@ -17,7 +17,7 @@ func functionArgsParser(allowFunctions bool) Type {
 		),
 	)
 
-	paramTypes := []Type{
+	paramTypes := []Func{
 		parseLiteralWithTails(Boolean()),
 		parseLiteralWithTails(Number()),
 		parseLiteralWithTails(TripleQuoteString()),
@@ -27,7 +27,7 @@ func functionArgsParser(allowFunctions bool) Type {
 	return func(input []rune) Result {
 		tmpParamTypes := paramTypes
 		if allowFunctions {
-			tmpParamTypes = append([]Type{}, paramTypes...)
+			tmpParamTypes = append([]Func{}, paramTypes...)
 			tmpParamTypes = append(tmpParamTypes, ParseQuery)
 		}
 		return DelimitedPattern(
@@ -38,25 +38,31 @@ func functionArgsParser(allowFunctions bool) Type {
 				),
 				"function arguments",
 			),
-			Expect(
-				MustBe(OneOf(tmpParamTypes...)),
+			MustBe(Expect(
+				OneOf(tmpParamTypes...),
 				"function argument",
-			),
-			Sequence(
-				Discard(SpacesAndTabs()),
-				comma,
-				whitespace,
-			),
-			Sequence(
-				whitespace,
-				close,
-			),
+			)),
+			MustBe(Expect(
+				Sequence(
+					Discard(SpacesAndTabs()),
+					comma,
+					whitespace,
+				),
+				"comma",
+			)),
+			MustBe(Expect(
+				Sequence(
+					whitespace,
+					close,
+				),
+				"closing bracket",
+			)),
 			false, false,
 		)(input)
 	}
 }
 
-func parseFunctionTail(fn query.Function) Type {
+func parseFunctionTail(fn query.Function) Func {
 	openBracket := Char('(')
 	closeBracket := Char(')')
 
@@ -92,7 +98,7 @@ func parseFunctionTail(fn query.Function) Type {
 	}
 }
 
-func parseLiteralWithTails(litParser Type) Type {
+func parseLiteralWithTails(litParser Func) Func {
 	delim := Sequence(
 		Char('.'),
 		Discard(
@@ -117,26 +123,20 @@ func parseLiteralWithTails(litParser Type) Type {
 				if fn != nil {
 					payload = fn
 				}
-				return Result{
-					Payload:   payload,
-					Remaining: res.Remaining,
-				}
+				return Success(payload, res.Remaining)
 			}
 			if fn == nil {
 				fn = query.NewLiteralFunction(lit)
 			}
 			if res = MustBe(parseFunctionTail(fn))(res.Remaining); res.Err != nil {
-				return Result{
-					Err:       res.Err,
-					Remaining: input,
-				}
+				return Fail(res.Err, input)
 			}
 			fn = res.Payload.(query.Function)
 		}
 	}
 }
 
-func parseWithTails(fnParser Type) Type {
+func parseWithTails(fnParser Func) Func {
 	delim := Sequence(
 		Char('.'),
 		Discard(
@@ -169,23 +169,17 @@ func parseWithTails(fnParser Type) Type {
 				if isNot {
 					fn = query.Not(fn)
 				}
-				return Result{
-					Payload:   fn,
-					Remaining: res.Remaining,
-				}
+				return Success(fn, res.Remaining)
 			}
 			if res = MustBe(parseFunctionTail(fn))(res.Remaining); res.Err != nil {
-				return Result{
-					Err:       res.Err,
-					Remaining: input,
-				}
+				return Fail(res.Err, input)
 			}
 			fn = res.Payload.(query.Function)
 		}
 	}
 }
 
-func quotedPathSegmentParser() Type {
+func quotedPathSegmentParser() Func {
 	pattern := QuotedString()
 
 	return func(input []rune) Result {
@@ -200,14 +194,11 @@ func quotedPathSegmentParser() Type {
 		rawSegment = strings.Replace(rawSegment, "~", "~0", -1)
 		rawSegment = strings.Replace(rawSegment, ".", "~1", -1)
 
-		return Result{
-			Payload:   rawSegment,
-			Remaining: res.Remaining,
-		}
+		return Success(rawSegment, res.Remaining)
 	}
 }
 
-func fieldLiteralMapParser(ctxFn query.Function) Type {
+func fieldLiteralMapParser(ctxFn query.Function) Func {
 	fieldPathParser := Expect(
 		OneOf(
 			JoinStringPayloads(
@@ -236,20 +227,14 @@ func fieldLiteralMapParser(ctxFn query.Function) Type {
 
 		fn, err := query.NewGetMethod(ctxFn, res.Payload.(string))
 		if err != nil {
-			return Result{
-				Remaining: input,
-				Err:       NewFatalError(input, err),
-			}
+			return Fail(NewFatalError(input, err), input)
 		}
 
-		return Result{
-			Remaining: res.Remaining,
-			Payload:   fn,
-		}
+		return Success(fn, res.Remaining)
 	}
 }
 
-func variableLiteralParser() Type {
+func variableLiteralParser() Func {
 	varPathParser := Expect(
 		Sequence(
 			Char('$'),
@@ -277,14 +262,11 @@ func variableLiteralParser() Type {
 		path := res.Payload.([]interface{})[1].(string)
 		fn := query.NewVarFunction(path)
 
-		return Result{
-			Remaining: res.Remaining,
-			Payload:   fn,
-		}
+		return Success(fn, res.Remaining)
 	}
 }
 
-func fieldLiteralRootParser() Type {
+func fieldLiteralRootParser() Func {
 	fieldPathParser := Expect(
 		JoinStringPayloads(
 			UntilFail(
@@ -317,20 +299,14 @@ func fieldLiteralRootParser() Type {
 			fn = query.NewFieldFunction(path)
 		}
 		if err != nil {
-			return Result{
-				Remaining: input,
-				Err:       NewFatalError(input, err),
-			}
+			return Fail(NewFatalError(input, err), input)
 		}
 
-		return Result{
-			Remaining: res.Remaining,
-			Payload:   fn,
-		}
+		return Success(fn, res.Remaining)
 	}
 }
 
-func methodParser(fn query.Function) Type {
+func methodParser(fn query.Function) Func {
 	p := Sequence(
 		Expect(
 			SnakeCase(),
@@ -352,19 +328,13 @@ func methodParser(fn query.Function) Type {
 
 		method, err := query.InitMethod(targetMethod, fn, args...)
 		if err != nil {
-			return Result{
-				Err:       NewFatalError(input, err),
-				Remaining: input,
-			}
+			return Fail(NewFatalError(input, err), input)
 		}
-		return Result{
-			Payload:   method,
-			Remaining: res.Remaining,
-		}
+		return Success(method, res.Remaining)
 	}
 }
 
-func functionParser() Type {
+func functionParser() Func {
 	p := Sequence(
 		Expect(
 			SnakeCase(),
@@ -386,15 +356,9 @@ func functionParser() Type {
 
 		fn, err := query.InitFunction(targetFunc, args...)
 		if err != nil {
-			return Result{
-				Err:       NewFatalError(input, err),
-				Remaining: input,
-			}
+			return Fail(NewFatalError(input, err), input)
 		}
-		return Result{
-			Payload:   fn,
-			Remaining: res.Remaining,
-		}
+		return Success(fn, res.Remaining)
 	}
 }
 
@@ -416,16 +380,9 @@ func parseDeprecatedFunction(input []rune) Result {
 
 	fn, exists := query.DeprecatedFunction(targetFunc, arg)
 	if !exists {
-		return Result{
-			Err:       NewError(input),
-			Remaining: input,
-		}
+		return Fail(NewError(input), input)
 	}
-	return Result{
-		Payload:   fn,
-		Err:       nil,
-		Remaining: nil,
-	}
+	return Success(fn, nil)
 }
 
 //------------------------------------------------------------------------------

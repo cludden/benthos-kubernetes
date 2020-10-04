@@ -9,96 +9,61 @@ input:
           - group: example.com
             version: v1
             kind: Bar
+    result:
+      requeue: meta().exists("requeue")
+      requeue_after: ${!meta("requeue_after").or("")}
+  processors:
+    - log:
+        message: ${!content()}
 
 pipeline:
   processors:
-    - bloblang: |
-        root = match {
-          meta().exists("deleted") => deleted()
-        }
-
-output:
-  switch:
-    outputs:
-      - condition:
-          bloblang: metadata.finalizers.or([]).contains("finalizer.foos.example.com") != true
-        output:
-          type: kubernetes
-          plugin: {}
+    - switch:
+        # ignore deleted items
+        - check: meta().exists("deleted")
           processors:
-            - bloblang: |
-                meta requeue_after = "1ms"
-                map finalizer {
-                  root = this
-                  metadata.finalizers = metadata.finalizers.append("finalizer.foos.example.com")
-                }
-                root = match {
-                  metadata.finalizers.or([]).contains("finalizer.foos.example.com") => deleted()
-                  _ => this.apply("finalizer")
-                }
-            - sync_response: {}
-            - log:
-                message: adding finalizer...
+            - bloblang: root = deleted()
 
-      - fallthrough: true
-        output:
-          type: kubernetes_status
-          plugin: {}
-          processors:
-            - bloblang: |
-                root = this
-                status.observedGeneration = metadata.generation
-                status.lastReconciledAt = timestamp_utc("2006-01-02T15:04:05.000000000Z")
-                status.status = if metadata.exists("deletionTimestamp") {
-                  "Destroying"
-                } else {
-                  "Reconciling"
-                }
-            - log:
-                message: updating status...
-
-      - output:
-          type: kubernetes
-          plugin: {}
-          processors:
+        # reconcile dependent resources
+        - processors:
             - branch:
-                request_map: |
-                  root = {
-                    "apiVersion": "example.com/v1",
-                    "kind": "Bar",
-                    "metadata": {
-                      "name": metadata.name,
-                      "namespace": metadata.namespace
-                    }
-                  }
                 processors:
+                  - bloblang: |
+                      meta size = spec.size
+                      apiVersion = "example.com/v1"
+                      kind = "Bar"
+                      metadata.labels = metadata.labels
+                      metadata.name = metadata.name
+                      metadata.namespace = metadata.namespace
+                      metadata.ownerReferences = [{
+                        "apiVersion": apiVersion,
+                        "kind": kind,
+                        "controller": true,
+                        "blockOwnerDeletion": true,
+                        "name": metadata.name,
+                        "uid": metadata.uid
+                      }]
                   - type: kubernetes
                     plugin:
                       operator: get
+                  - bloblang: |
+                      root = this
+                      spec.size = meta("size").number()
+                  - type: kubernetes
+                    plugin:
+                      operator_mapping: if errored() { "create" } else { "update" }
                 result_map: |
-                  root.bar = if errored() {
-                    throw(error())
-                  } else {
-                    this
-                  }
-
-            - log:
-                message: reconciling bar
-
+                  root.status.bar = metadata.uid
+                  root.status.status = "Ready"
             - bloblang: |
-                let ownerRef = {
-                  "apiVersion": apiVersion,
-                  "controller": true,
-                  "blockOwnerDeletion": true,
-                  "kind": kind,
-                  "name": metadata.name,
-                  "uid": metadata.uid
-                }
+                root = this
+                meta requeue = if metadata.annotations.exists("x-requeue") { "true" }
+                meta requeue_after = metadata.annotations."x-requeue-after".or("")
+            - sync_response: {}
 
-                root = bar
-                root.metadata.labels = metadata.labels
-                root.metadata.ownerReferences = [$ownerRef]
-                root.spec.size = spec.size
+output:
+  type: kubernetes_status
+  plugin: {}
 
 logger:
-  level: info
+  level: DEBUG

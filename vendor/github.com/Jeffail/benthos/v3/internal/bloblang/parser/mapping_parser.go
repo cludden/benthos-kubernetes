@@ -35,7 +35,7 @@ func ParseMapping(filepath string, expr string) (*mapping.Executor, *Error) {
 
 //------------------------------------------------------------------------------'
 
-func parseExecutor(baseDir string) Type {
+func parseExecutor(baseDir string) Func {
 	newline := NewlineAllowComment()
 	whitespace := SpacesAndTabs()
 	allWhitespace := DiscardAll(OneOf(whitespace, newline))
@@ -70,10 +70,7 @@ func parseExecutor(baseDir string) Type {
 			}
 
 			if res = newline(res.Remaining); res.Err != nil {
-				return Result{
-					Err:       res.Err,
-					Remaining: input,
-				}
+				return Fail(res.Err, input)
 			}
 
 			res = allWhitespace(res.Remaining)
@@ -82,24 +79,17 @@ func parseExecutor(baseDir string) Type {
 			}
 
 			if res = statement(res.Remaining); res.Err != nil {
-				return Result{
-					Err:       res.Err,
-					Remaining: input,
-				}
+				return Fail(res.Err, input)
 			}
 			if mStmt, ok := res.Payload.(mapping.Statement); ok {
 				statements = append(statements, mStmt)
 			}
 		}
-
-		return Result{
-			Remaining: res.Remaining,
-			Payload:   mapping.NewExecutor(input, maps, statements...),
-		}
+		return Success(mapping.NewExecutor(input, maps, statements...), res.Remaining)
 	}
 }
 
-func singleRootMapping() Type {
+func singleRootMapping() Func {
 	whitespace := SpacesAndTabs()
 	allWhitespace := DiscardAll(OneOf(whitespace, Newline()))
 
@@ -114,24 +104,17 @@ func singleRootMapping() Type {
 		// Remove all tailing whitespace and ensure no remaining input.
 		res = allWhitespace(res.Remaining)
 		if len(res.Remaining) > 0 {
-			return Result{
-				Remaining: input,
-				Err:       NewError(res.Remaining, "end of input"),
-			}
+			return Fail(NewError(res.Remaining, "end of input"), input)
 		}
 
 		stmt := mapping.NewStatement(input, mapping.NewJSONAssignment(), fn)
-
-		return Result{
-			Remaining: nil,
-			Payload:   mapping.NewExecutor(input, map[string]query.Function{}, stmt),
-		}
+		return Success(mapping.NewExecutor(input, map[string]query.Function{}, stmt), nil)
 	}
 }
 
 //------------------------------------------------------------------------------
 
-func varNameParser() Type {
+func varNameParser() Func {
 	return JoinStringPayloads(
 		UntilFail(
 			OneOf(
@@ -145,7 +128,7 @@ func varNameParser() Type {
 	)
 }
 
-func importParser(baseDir string, maps map[string]query.Function) Type {
+func importParser(baseDir string, maps map[string]query.Function) Func {
 	p := Sequence(
 		Term("import"),
 		SpacesAndTabs(),
@@ -167,27 +150,19 @@ func importParser(baseDir string, maps map[string]query.Function) Type {
 		filepath = path.Join(baseDir, filepath)
 		contents, err := ioutil.ReadFile(filepath)
 		if err != nil {
-			return Result{
-				Err:       NewFatalError(input, fmt.Errorf("failed to read import: %w", err)),
-				Remaining: input,
-			}
+			return Fail(NewFatalError(input, fmt.Errorf("failed to read import: %w", err)), input)
 		}
 
 		importContent := []rune(string(contents))
 		execRes := parseExecutor(path.Dir(filepath))(importContent)
 		if execRes.Err != nil {
-			return Result{
-				Err:       NewFatalError(input, NewImportError(filepath, importContent, execRes.Err)),
-				Remaining: input,
-			}
+			return Fail(NewFatalError(input, NewImportError(filepath, importContent, execRes.Err)), input)
 		}
 
 		exec := execRes.Payload.(*mapping.Executor)
 		if len(exec.Maps()) == 0 {
-			return Result{
-				Err:       NewFatalError(input, fmt.Errorf("no maps to import from '%v'", filepath)),
-				Remaining: input,
-			}
+			err := fmt.Errorf("no maps to import from '%v'", filepath)
+			return Fail(NewFatalError(input, err), input)
 		}
 
 		collisions := []string{}
@@ -199,20 +174,15 @@ func importParser(baseDir string, maps map[string]query.Function) Type {
 			}
 		}
 		if len(collisions) > 0 {
-			return Result{
-				Err:       NewFatalError(input, fmt.Errorf("map name collisions from import '%v': %v", filepath, collisions)),
-				Remaining: input,
-			}
+			err := fmt.Errorf("map name collisions from import '%v': %v", filepath, collisions)
+			return Fail(NewFatalError(input, err), input)
 		}
 
-		return Result{
-			Payload:   filepath,
-			Remaining: res.Remaining,
-		}
+		return Success(filepath, res.Remaining)
 	}
 }
 
-func mapParser(maps map[string]query.Function) Type {
+func mapParser(maps map[string]query.Function) Func {
 	newline := NewlineAllowComment()
 	whitespace := SpacesAndTabs()
 	allWhitespace := DiscardAll(OneOf(whitespace, newline))
@@ -265,10 +235,7 @@ func mapParser(maps map[string]query.Function) Type {
 		stmtSlice := seqSlice[4].([]interface{})
 
 		if _, exists := maps[ident]; exists {
-			return Result{
-				Err:       NewFatalError(input, fmt.Errorf("map name collision: %v", ident)),
-				Remaining: input,
-			}
+			return Fail(NewFatalError(input, fmt.Errorf("map name collision: %v", ident)), input)
 		}
 
 		statements := make([]mapping.Statement, len(stmtSlice))
@@ -278,14 +245,11 @@ func mapParser(maps map[string]query.Function) Type {
 
 		maps[ident] = mapping.NewExecutor(input, maps, statements...)
 
-		return Result{
-			Payload:   ident,
-			Remaining: res.Remaining,
-		}
+		return Success(ident, res.Remaining)
 	}
 }
 
-func letStatementParser() Type {
+func letStatementParser() Func {
 	p := Sequence(
 		Expect(Term("let"), "assignment"),
 		SpacesAndTabs(),
@@ -311,18 +275,18 @@ func letStatementParser() Type {
 			return res
 		}
 		resSlice := res.Payload.([]interface{})
-		return Result{
-			Payload: mapping.NewStatement(
+		return Success(
+			mapping.NewStatement(
 				input,
 				mapping.NewVarAssignment(resSlice[2].(string)),
 				resSlice[6].(query.Function),
 			),
-			Remaining: res.Remaining,
-		}
+			res.Remaining,
+		)
 	}
 }
 
-func nameLiteralParser() Type {
+func nameLiteralParser() Func {
 	return JoinStringPayloads(
 		UntilFail(
 			OneOf(
@@ -339,7 +303,7 @@ func nameLiteralParser() Type {
 	)
 }
 
-func metaStatementParser(disabled bool) Type {
+func metaStatementParser(disabled bool) Func {
 	p := Sequence(
 		Expect(Term("meta"), "assignment"),
 		SpacesAndTabs(),
@@ -359,10 +323,10 @@ func metaStatementParser(disabled bool) Type {
 			return res
 		}
 		if disabled {
-			return Result{
-				Err:       NewFatalError(input, errors.New("setting meta fields from within a map is not allowed")),
-				Remaining: input,
-			}
+			return Fail(
+				NewFatalError(input, errors.New("setting meta fields from within a map is not allowed")),
+				input,
+			)
 		}
 		resSlice := res.Payload.([]interface{})
 
@@ -371,18 +335,18 @@ func metaStatementParser(disabled bool) Type {
 			keyPtr = &key
 		}
 
-		return Result{
-			Payload: mapping.NewStatement(
+		return Success(
+			mapping.NewStatement(
 				input,
 				mapping.NewMetaAssignment(keyPtr),
 				resSlice[6].(query.Function),
 			),
-			Remaining: res.Remaining,
-		}
+			res.Remaining,
+		)
 	}
 }
 
-func pathLiteralSegmentParser() Type {
+func pathLiteralSegmentParser() Func {
 	return JoinStringPayloads(
 		UntilFail(
 			OneOf(
@@ -398,7 +362,7 @@ func pathLiteralSegmentParser() Type {
 	)
 }
 
-func quotedPathLiteralSegmentParser() Type {
+func quotedPathLiteralSegmentParser() Func {
 	pattern := QuotedString()
 
 	return func(input []rune) Result {
@@ -413,14 +377,11 @@ func quotedPathLiteralSegmentParser() Type {
 		rawSegment = strings.Replace(rawSegment, "~", "~0", -1)
 		rawSegment = strings.Replace(rawSegment, ".", "~1", -1)
 
-		return Result{
-			Payload:   rawSegment,
-			Remaining: res.Remaining,
-		}
+		return Success(rawSegment, res.Remaining)
 	}
 }
 
-func pathParser() Type {
+func pathParser() Func {
 	p := Sequence(
 		Expect(pathLiteralSegmentParser(), "assignment"),
 		Optional(
@@ -456,14 +417,11 @@ func pathParser() Type {
 			}
 		}
 
-		return Result{
-			Payload:   path,
-			Remaining: res.Remaining,
-		}
+		return Success(path, res.Remaining)
 	}
 }
 
-func plainMappingStatementParser() Type {
+func plainMappingStatementParser() Func {
 	p := Sequence(
 		pathParser(),
 		SpacesAndTabs(),
@@ -484,14 +442,14 @@ func plainMappingStatementParser() Type {
 			path = path[1:]
 		}
 
-		return Result{
-			Payload: mapping.NewStatement(
+		return Success(
+			mapping.NewStatement(
 				input,
 				mapping.NewJSONAssignment(path...),
 				resSlice[4].(query.Function),
 			),
-			Remaining: res.Remaining,
-		}
+			res.Remaining,
+		)
 	}
 }
 

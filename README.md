@@ -1,17 +1,17 @@
 # benthos-kubernetes
 
-a collections of [benthos](https://github.com/Jeffail/benthos) plugins for integrating with Kubernetes.
+a collection of [benthos](https://github.com/Jeffail/benthos) plugins for integrating with Kubernetes.
 
-**Inputs:**
+#### Inputs
 
 - [kubernetes](./doc/kubernetes_input.md) streams kubernetes objects for one or more configured watches
 
-**Outputs:**
+#### Outputs
 
 - [kubernetes](./doc/kubernetes_output.md) creates, updates, and deleted kubernetes objects
 - [kubernetes_status](./doc/kubernetes_status_output.md) writes object status to kubernetes
 
-**Processors:**
+#### Processors
 
 - [kubernetes](./doc/kubernetes_processor.md) performs operations against a kubernetes cluster
 
@@ -27,9 +27,82 @@ a collections of [benthos](https://github.com/Jeffail/benthos) plugins for integ
 - download a [release](https://github.com/cludden/benthos-kubernetes/releases)
 - as a benthos [plugin](./cmd/benthos/main.go)
 
+  ```go
+  package main
+
+  import (
+    "github.com/Jeffail/benthos/v3/lib/service"
+    _ "github.com/cludden/benthos-kubernetes/input"
+    _ "github.com/cludden/benthos-kubernetes/output"
+    _ "github.com/cludden/benthos-kubernetes/processor"
+  )
+
+  func main() {
+    service.Run()
+  }
+  ```
+
 ## Getting Started
 
-See [examples](./example/status.yml)
+```yaml
+input:
+  type: kubernetes
+  plugin:
+    watches:
+      - group: example.com
+        version: v1
+        kind: Foo
+        owns:
+          - group: example.com
+            version: v1
+            kind: Bar
+    result:
+      requeue: meta().exists("requeue")
+      requeue_after: ${!meta("requeue_after").catch("")}
+
+pipeline:
+  processors:
+    - switch:
+        # ignore deleted items
+        - check: meta().exists("deleted")
+          processors:
+            - bloblang: root = deleted()
+
+        # reconcile dependent resources
+        - processors:
+            - branch:
+                processors:
+                  - bloblang: |
+                      apiVersion = "example.com/v1"
+                      kind = "Bar"
+                      metadata.labels = metadata.labels
+                      metadata.name = metadata.name
+                      metadata.namespace = metadata.namespace
+                      metadata.ownerReferences = [{
+                        "apiVersion": apiVersion,
+                        "kind": kind,
+                        "controller": true,
+                        "blockOwnerDeletion": true,
+                        "name": metadata.name,
+                        "uid": metadata.uid
+                      }]
+                      spec = spec
+                  - type: kubernetes
+                    plugin:
+                      operator: get
+                  - type: kubernetes
+                    plugin:
+                      operator: ${! if errored() { "create" } else { "update" } }
+                result_map: |
+                  root.status.bar = metadata.uid
+                  root.status.status = "Ready"
+
+output:
+  type: kubernetes_status
+  plugin: {}
+```
+
+Additional examples provided [here](./example)
 
 ## License
 
