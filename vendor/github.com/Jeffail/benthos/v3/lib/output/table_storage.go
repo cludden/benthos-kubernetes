@@ -14,19 +14,22 @@ import (
 func init() {
 	Constructors[TypeTableStorage] = TypeSpec{
 		constructor: NewAzureTableStorage,
-		Beta:        true,
+		Status:      docs.StatusBeta,
 		Summary: `
 Stores message parts in an Azure Table Storage table.`,
 		Description: `
+Only one authentication method is required, ` + "`storage_connection_string`" + ` or ` + "`storage_account` and `storage_access_key`" + `. If both are set then the ` + "`storage_connection_string`" + ` is given priority.
+
 In order to set the ` + "`table_name`" + `,  ` + "`partition_key`" + ` and ` + "`row_key`" + ` 
 you can use function interpolations described [here](/docs/configuration/interpolation#bloblang-queries), which are
 calculated per message of a batch.
 
 If the ` + "`properties`" + ` are not set in the config, all the ` + "`json`" + ` fields
 are marshaled and stored in the table, which will be created if it does not exist.
+
 The ` + "`object`" + ` and ` + "`array`" + ` fields are marshaled as strings. e.g.:
 
-The json message:
+The JSON message:
 ` + "``` yaml" + `
 {
   "foo": 55,
@@ -38,7 +41,7 @@ The json message:
 }
 ` + "```" + `
 
-will store in the table the following properties:
+Will store in the table the following properties:
 ` + "``` yaml" + `
 foo: '55'
 bar: '{ "baz": "a", "bez": "b" }'
@@ -47,10 +50,10 @@ diz: '["a", "b"]'
 
 It's also possible to use function interpolations to get or transform the properties values, e.g.:
 
-` + "``` yaml" + `
+` + "```yaml" + `
 properties:
-	device: '${! json("device") }'
-	timestamp: '${! json("timestamp") }'
+  device: '${! json("device") }'
+  timestamp: '${! json("timestamp") }'
 ` + "```" + ``,
 		sanitiseConfigFunc: func(conf Config) (interface{}, error) {
 			return sanitiseWithBatch(conf.TableStorage, conf.TableStorage.Batching)
@@ -58,8 +61,18 @@ properties:
 		Async:   true,
 		Batches: true,
 		FieldSpecs: docs.FieldSpecs{
-			docs.FieldCommon("storage_account", "The storage account to upload messages to."),
-			docs.FieldCommon("storage_access_key", "The storage account access key."),
+			docs.FieldCommon(
+				"storage_account",
+				"The storage account to upload messages to. This field is ignored if `storage_connection_string` is set.",
+			),
+			docs.FieldCommon(
+				"storage_access_key",
+				"The storage account access key. This field is ignored if `storage_connection_string` is set.",
+			),
+			docs.FieldCommon(
+				"storage_connection_string",
+				"A storage account connection string. This field is required if `storage_account` and `storage_access_key` are not set.",
+			),
 			docs.FieldCommon("table_name", "The table to store messages into.",
 				`${!meta("kafka_topic")}`,
 			).SupportsInterpolation(false),

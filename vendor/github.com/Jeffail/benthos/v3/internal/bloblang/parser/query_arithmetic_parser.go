@@ -97,9 +97,9 @@ func arithmeticParser(fnParser Func) Func {
 			return res
 		}
 
-		seqSlice := res.Payload.([]interface{})
-		for _, fnSeqI := range seqSlice[0].([]interface{}) {
-			fnSeq := fnSeqI.([]interface{})
+		delimRes := res.Payload.(DelimitedResult)
+		for _, primaryRes := range delimRes.Primary {
+			fnSeq := primaryRes.([]interface{})
 			fn := fnSeq[1].(query.Function)
 			if fnSeq[0] != nil {
 				var err error
@@ -112,24 +112,18 @@ func arithmeticParser(fnParser Func) Func {
 						query.ArithmeticSub,
 					},
 				); err != nil {
-					return Fail(
-						NewFatalError(input, err),
-						input,
-					)
+					return Fail(NewFatalError(input, err), input)
 				}
 			}
 			fns = append(fns, fn)
 		}
-		for _, op := range seqSlice[1].([]interface{}) {
+		for _, op := range delimRes.Delimiter {
 			ops = append(ops, op.([]interface{})[1].(query.ArithmeticOperator))
 		}
 
 		fn, err := query.NewArithmeticExpression(fns, ops)
 		if err != nil {
-			return Fail(
-				NewFatalError(input, err),
-				input,
-			)
+			return Fail(NewFatalError(input, err), input)
 		}
 		return Success(fn, res.Remaining)
 	}

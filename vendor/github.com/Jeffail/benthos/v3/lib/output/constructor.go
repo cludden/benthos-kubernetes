@@ -50,14 +50,13 @@ type TypeSpec struct {
 	// Batches indicates whether this output benefits from batching of messages.
 	Batches bool
 
+	Status      docs.Status
 	Summary     string
 	Description string
 	Categories  []Category
 	Footnotes   string
 	FieldSpecs  docs.FieldSpecs
 	Examples    []docs.AnnotatedExample
-	Beta        bool
-	Deprecated  bool
 }
 
 // Constructors is a map of all output types with their specs.
@@ -103,6 +102,7 @@ const (
 	TypeSNS             = "sns"
 	TypeSQS             = "sqs"
 	TypeSTDOUT          = "stdout"
+	TypeSubprocess      = "subprocess"
 	TypeSwitch          = "switch"
 	TypeSyncResponse    = "sync_response"
 	TypeTableStorage    = "table_storage"
@@ -156,6 +156,7 @@ type Config struct {
 	SNS             writer.SNSConfig               `json:"sns" yaml:"sns"`
 	SQS             writer.AmazonSQSConfig         `json:"sqs" yaml:"sqs"`
 	STDOUT          STDOUTConfig                   `json:"stdout" yaml:"stdout"`
+	Subprocess      SubprocessConfig               `json:"subprocess" yaml:"subprocess"`
 	Switch          SwitchConfig                   `json:"switch" yaml:"switch"`
 	SyncResponse    struct{}                       `json:"sync_response" yaml:"sync_response"`
 	TableStorage    writer.AzureTableStorageConfig `json:"table_storage" yaml:"table_storage"`
@@ -209,6 +210,7 @@ func NewConfig() Config {
 		SNS:             writer.NewSNSConfig(),
 		SQS:             writer.NewAmazonSQSConfig(),
 		STDOUT:          NewSTDOUTConfig(),
+		Subprocess:      NewSubprocessConfig(),
 		Switch:          NewSwitchConfig(),
 		SyncResponse:    struct{}{},
 		TableStorage:    writer.NewAzureTableStorageConfig(),

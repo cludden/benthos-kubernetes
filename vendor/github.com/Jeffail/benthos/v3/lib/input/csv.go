@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"sync"
 	"time"
 
 	"github.com/Jeffail/benthos/v3/internal/docs"
+	"github.com/Jeffail/benthos/v3/internal/filepath"
 	"github.com/Jeffail/benthos/v3/lib/input/reader"
 	"github.com/Jeffail/benthos/v3/lib/log"
 	"github.com/Jeffail/benthos/v3/lib/message"
@@ -22,12 +24,15 @@ import (
 func init() {
 	Constructors[TypeCSVFile] = TypeSpec{
 		constructor: NewCSVFile,
-		Beta:        true,
+		Status:      docs.StatusBeta,
 		Summary: `
 Reads one or more CSV files as structured records following the format described
 in RFC 4180.`,
 		FieldSpecs: docs.FieldSpecs{
-			docs.FieldCommon("paths", "A list of file paths to read from. Each file will be read sequentially until the list is exhausted, at which point the input will close."),
+			docs.FieldCommon(
+				"paths", "A list of file paths to read from. Each file will be read sequentially until the list is exhausted, at which point the input will close. Glob patterns are supported.",
+				[]string{"/tmp/foo.csv", "/tmp/bar/*.csv"},
+			),
 			docs.FieldCommon("parse_header_row", "Whether to reference the first row as a header row. If set to true the output structure for messages will be an object where field keys are determined by the header row."),
 			docs.FieldCommon("delimiter", `The delimiter to use for splitting values in each record, must be a single character.`),
 			docs.FieldAdvanced("batch_count", `Optionally process records in batches. This can help to speed up the consumption of exceptionally large CSV files. When the end of the file is reached the remaining records are processed as a (potentially smaller) batch.`),
@@ -99,7 +104,10 @@ func NewCSVFile(conf Config, mgr types.Manager, log log.Modular, stats metrics.T
 
 	comma := delimRunes[0]
 
-	pathsRemaining := conf.CSVFile.Paths
+	pathsRemaining, err := filepath.Globs(conf.CSVFile.Paths)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve path glob: %w", err)
+	}
 	if len(pathsRemaining) == 0 {
 		return nil, errors.New("requires at least one input file path")
 	}

@@ -105,8 +105,10 @@ func (w *AsyncWriter) loop() {
 	)
 
 	defer func() {
+		w.writer.CloseAsync()
 		err := w.writer.WaitForClose(time.Second)
 		for ; err != nil; err = w.writer.WaitForClose(time.Second) {
+			w.log.Warnf("Waiting for output to close, blocked by: %v\n", err)
 		}
 		atomic.StoreInt32(&w.isConnected, 0)
 		close(w.closedChan)

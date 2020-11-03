@@ -2,6 +2,7 @@ package query
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -30,6 +31,7 @@ var _ = RegisterMethod(
 	),
 	false, allMethod,
 	ExpectNArgs(1),
+	ExpectFunctionArg(0),
 )
 
 func allMethod(target Function, args ...interface{}) (Function, error) {
@@ -84,6 +86,7 @@ var _ = RegisterMethod(
 	),
 	false, anyMethod,
 	ExpectNArgs(1),
+	ExpectFunctionArg(0),
 )
 
 func anyMethod(target Function, args ...interface{}) (Function, error) {
@@ -166,6 +169,17 @@ var _ = RegisterMethod(
 root.foo = this.doc.apply("thing")`,
 			`{"doc":{"first":"hello world"}}`,
 			`{"foo":{"inner":"hello world"}}`,
+		),
+		NewExampleSpec("",
+			`map create_foo {
+  root.name = "a foo"
+  root.purpose = "to be a foo"
+}
+
+root = this
+root.foo = null.apply("create_foo")`,
+			`{"id":"1234"}`,
+			`{"foo":{"name":"a foo","purpose":"to be a foo"},"id":"1234"}`,
 		),
 	),
 	true, applyMethod,
@@ -272,7 +286,7 @@ var _ = RegisterMethod(
 func catchMethod(fn Function, args ...interface{}) (Function, error) {
 	var catchFn Function
 	switch t := args[0].(type) {
-	case uint64, int64, float64, string, []byte, bool, []interface{}, map[string]interface{}:
+	case uint64, int64, float64, json.Number, string, []byte, bool, []interface{}, map[string]interface{}:
 		catchFn = NewLiteralFunction(t)
 	case Function:
 		catchFn = t
@@ -517,7 +531,7 @@ var _ = RegisterMethod(
 		"filter", "",
 	).InCategory(
 		MethodCategoryObjectAndArray,
-		"Executes a mapping query argument for each element of an array or key/value pair of an object, and unless the mapping returns `false` the item is removed from the resulting array or object.",
+		"Executes a mapping query argument for each element of an array or key/value pair of an object, and unless the mapping returns `true` the item is removed from the resulting array or object.",
 		NewExampleSpec(``,
 			`root.new_nums = this.nums.filter(this > 10)`,
 			`{"nums":[3,11,4,17]}`,
@@ -533,6 +547,7 @@ When filtering objects the mapping query argument is provided a context with a f
 	),
 	false, filterMethod,
 	ExpectNArgs(1),
+	ExpectFunctionArg(0),
 )
 
 func filterMethod(target Function, args ...interface{}) (Function, error) {
@@ -639,6 +654,7 @@ var _ = RegisterMethod(
 	),
 	false, foldMethod,
 	ExpectNArgs(2),
+	ExpectFunctionArg(1),
 )
 
 func foldMethod(target Function, args ...interface{}) (Function, error) {
@@ -910,7 +926,7 @@ var _ = RegisterMethod(
 			"In order to load a schema from a file use the `file` function.",
 			`root = this.json_schema(file(var("BENTHOS_TEST_BLOBLANG_SCHEMA_FILE")))`,
 		),
-	).IsBeta(true),
+	).Beta(),
 	true, jsonSchemaMethod,
 	ExpectNArgs(1),
 	ExpectStringArg(0),
@@ -1031,6 +1047,7 @@ func lengthMethod(target Function, _ ...interface{}) (Function, error) {
 var _ = RegisterMethod(
 	NewDeprecatedMethodSpec("map"), false, mapMethod,
 	ExpectNArgs(1),
+	ExpectFunctionArg(0),
 )
 
 // NewMapMethod attempts to create a map method.
@@ -1083,6 +1100,7 @@ Apply a mapping to each value of an object and replace the value with the result
 	),
 	false, mapEachMethod,
 	ExpectNArgs(1),
+	ExpectFunctionArg(0),
 )
 
 func mapEachMethod(target Function, args ...interface{}) (Function, error) {
@@ -1352,7 +1370,7 @@ var _ = RegisterMethod(
 func orMethod(fn Function, args ...interface{}) (Function, error) {
 	var orFn Function
 	switch t := args[0].(type) {
-	case uint64, int64, float64, string, []byte, bool, []interface{}, map[string]interface{}:
+	case uint64, int64, float64, json.Number, string, []byte, bool, []interface{}, map[string]interface{}:
 		orFn = NewLiteralFunction(t)
 	case Function:
 		orFn = t
@@ -1389,12 +1407,13 @@ var _ = RegisterMethod(
 	),
 	false, sortMethod,
 	ExpectOneOrZeroArgs(),
+	ExpectFunctionArg(0),
 )
 
 func sortMethod(target Function, args ...interface{}) (Function, error) {
 	compareFn := func(ctx FunctionContext, values []interface{}, i, j int) (bool, error) {
 		switch values[i].(type) {
-		case float64, int64, uint64:
+		case float64, int64, uint64, json.Number:
 			var lhs, rhs float64
 			var err error
 			if lhs, err = IGetNumber(values[i]); err == nil {
@@ -1602,7 +1621,7 @@ func sumMethod(target Function, _ ...interface{}) (Function, error) {
 			}
 		}
 		switch t := v.(type) {
-		case float64, int64, uint64:
+		case float64, int64, uint64, json.Number:
 			return v, nil
 		case []interface{}:
 			var total float64
@@ -1670,6 +1689,7 @@ var _ = RegisterMethod(
 	),
 	false, uniqueMethod,
 	ExpectOneOrZeroArgs(),
+	ExpectFunctionArg(0),
 )
 
 func uniqueMethod(target Function, args ...interface{}) (Function, error) {
@@ -1728,6 +1748,18 @@ func uniqueMethod(target Function, args ...interface{}) (Function, error) {
 				unique = checkStr(t)
 			case []byte:
 				unique = checkStr(string(t))
+			case json.Number:
+				f, err := t.Float64()
+				if err != nil {
+					var i int64
+					if i, err = t.Int64(); err == nil {
+						f = float64(i)
+					}
+				}
+				if err != nil {
+					return nil, fmt.Errorf("index %v: failed to parse number: %w", i, err)
+				}
+				unique = checkNum(f)
 			case int64:
 				unique = checkNum(float64(t))
 			case uint64:

@@ -3,10 +3,19 @@ package message
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 
 	"github.com/Jeffail/benthos/v3/lib/message/metadata"
 	"github.com/Jeffail/benthos/v3/lib/types"
 )
+
+var useNumber bool = true
+
+func init() {
+	if os.Getenv("BENTHOS_USE_NUMBER") == "false" {
+		useNumber = false
+	}
+}
 
 //------------------------------------------------------------------------------
 
@@ -101,7 +110,11 @@ func (p *Part) JSON() (interface{}, error) {
 	if p.data == nil {
 		return nil, ErrMessagePartNotExist
 	}
-	if err := json.Unmarshal(p.data, &p.jsonCache); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(p.data))
+	if useNumber {
+		dec.UseNumber()
+	}
+	if err := dec.Decode(&p.jsonCache); err != nil {
 		return nil, err
 	}
 	return p.jsonCache, nil

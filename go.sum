@@ -82,6 +82,8 @@ github.com/ClickHouse/clickhouse-go v1.4.3/go.mod h1:EaI/sW7Azgz9UATzd5ZdZHRUhHg
 github.com/DataDog/datadog-go v2.2.0+incompatible/go.mod h1:LButxg5PwREeZtORoXG3tL4fMGNddJ+vMq1mwgfaqoQ=
 github.com/Jeffail/benthos/v3 v3.29.0 h1:jc7rYRyf7Rw2Y2Fnm63k5nwQGPsu3hTRSdJ6pim3ZuE=
 github.com/Jeffail/benthos/v3 v3.29.0/go.mod h1:1fFh2ASs5qXNhk7AI/IrwDZpeIT211PvubJR2wCPlhM=
+github.com/Jeffail/benthos/v3 v3.32.0 h1:ajdv29By+WaDzhzEmXur1BFQlXElrKEfUMfy2zH+sys=
+github.com/Jeffail/benthos/v3 v3.32.0/go.mod h1:GqePjmAdnR811mzbi0Nkok8WHy+VFWrqV3bLNoXwPPY=
 github.com/Jeffail/gabs/v2 v2.6.0 h1:WdCnGaDhNa4LSRTMwhLZzJ7SRDXjABNP13SOKvCpL5w=
 github.com/Jeffail/gabs/v2 v2.6.0/go.mod h1:xCn81vdHKxFUuWWAaD5jCTQDNPBMh5pPs9IJ+NcziBI=
 github.com/Knetic/govaluate v3.0.1-0.20171022003610-9aa49832a739+incompatible/go.mod h1:r7JcOSlj0wfOMncg0iLm8Leh48TZaKVeNIfJntJ2wa0=

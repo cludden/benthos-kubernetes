@@ -9,13 +9,9 @@ cloud.google.com/go/pubsub
 cloud.google.com/go/pubsub/apiv1
 cloud.google.com/go/pubsub/internal/distribution
 cloud.google.com/go/pubsub/internal/scheduler
-# github.com/Azure/azure-pipeline-go v0.2.3
-github.com/Azure/azure-pipeline-go/pipeline
 # github.com/Azure/azure-sdk-for-go v45.1.0+incompatible
 github.com/Azure/azure-sdk-for-go/storage
 github.com/Azure/azure-sdk-for-go/version
-# github.com/Azure/azure-storage-blob-go v0.10.0
-github.com/Azure/azure-storage-blob-go/azblob
 # github.com/Azure/go-amqp v0.13.1
 github.com/Azure/go-amqp
 github.com/Azure/go-amqp/internal/testconn
@@ -43,7 +39,7 @@ github.com/ClickHouse/clickhouse-go/lib/lz4
 github.com/ClickHouse/clickhouse-go/lib/protocol
 github.com/ClickHouse/clickhouse-go/lib/types
 github.com/ClickHouse/clickhouse-go/lib/writebuffer
-# github.com/Jeffail/benthos/v3 v3.29.0
+# github.com/Jeffail/benthos/v3 v3.32.0
 ## explicit
 github.com/Jeffail/benthos/v3/internal/batch
 github.com/Jeffail/benthos/v3/internal/bloblang
@@ -52,7 +48,9 @@ github.com/Jeffail/benthos/v3/internal/bloblang/mapping
 github.com/Jeffail/benthos/v3/internal/bloblang/parser
 github.com/Jeffail/benthos/v3/internal/bloblang/query
 github.com/Jeffail/benthos/v3/internal/docs
+github.com/Jeffail/benthos/v3/internal/filepath
 github.com/Jeffail/benthos/v3/internal/message
+github.com/Jeffail/benthos/v3/internal/service/redis
 github.com/Jeffail/benthos/v3/internal/transaction
 github.com/Jeffail/benthos/v3/lib/api
 github.com/Jeffail/benthos/v3/lib/bloblang
@@ -346,8 +344,6 @@ github.com/mailru/easyjson/jlexer
 github.com/mailru/easyjson/jwriter
 # github.com/mattn/go-colorable v0.1.7
 github.com/mattn/go-colorable
-# github.com/mattn/go-ieproxy v0.0.1
-github.com/mattn/go-ieproxy
 # github.com/mattn/go-isatty v0.0.12
 github.com/mattn/go-isatty
 # github.com/matttproud/golang_protobuf_extensions v1.0.1
@@ -507,7 +503,6 @@ golang.org/x/net/context/ctxhttp
 golang.org/x/net/html
 golang.org/x/net/html/atom
 golang.org/x/net/http/httpguts
-golang.org/x/net/http/httpproxy
 golang.org/x/net/http2
 golang.org/x/net/http2/hpack
 golang.org/x/net/idna
@@ -518,6 +513,7 @@ golang.org/x/net/trace
 golang.org/x/net/websocket
 # golang.org/x/oauth2 v0.0.0-20200107190931-bf48bf16ab8d
 golang.org/x/oauth2
+golang.org/x/oauth2/clientcredentials
 golang.org/x/oauth2/google
 golang.org/x/oauth2/internal
 golang.org/x/oauth2/jws
@@ -529,7 +525,6 @@ golang.org/x/sync/semaphore
 golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
 golang.org/x/sys/windows
-golang.org/x/sys/windows/registry
 # golang.org/x/text v0.3.3
 golang.org/x/text/secure/bidirule
 golang.org/x/text/transform

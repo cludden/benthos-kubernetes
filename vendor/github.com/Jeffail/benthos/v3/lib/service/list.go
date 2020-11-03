@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/Jeffail/benthos/v3/internal/bloblang/query"
+	"github.com/Jeffail/benthos/v3/internal/docs"
 	"github.com/Jeffail/benthos/v3/lib/buffer"
 	"github.com/Jeffail/benthos/v3/lib/cache"
 	"github.com/Jeffail/benthos/v3/lib/condition"
@@ -21,6 +22,18 @@ import (
 )
 
 //------------------------------------------------------------------------------
+
+func listableStatus(s docs.Status) bool {
+	switch s {
+	case "": // Empty status is the equivalent of stable.
+		return true
+	case docs.StatusStable:
+		return true
+	case docs.StatusBeta:
+		return true
+	}
+	return false
+}
 
 func listComponents(c *cli.Context) {
 	jsonFmt := c.String("format") == "json"
@@ -70,14 +83,14 @@ func listComponents(c *cli.Context) {
 	}()
 
 	for t, c := range input.Constructors {
-		if !c.Deprecated {
+		if listableStatus(c.Status) {
 			components = append(components, t)
 		}
 	}
 	printAll("Inputs")
 
 	for t, c := range processor.Constructors {
-		if !c.Deprecated {
+		if listableStatus(c.Status) {
 			components = append(components, t)
 		}
 	}
@@ -89,34 +102,44 @@ func listComponents(c *cli.Context) {
 	printAll("Conditions")
 
 	for t, c := range output.Constructors {
-		if !c.Deprecated {
+		if listableStatus(c.Status) {
 			components = append(components, t)
 		}
 	}
 	printAll("Outputs")
 
-	for t := range cache.Constructors {
-		components = append(components, t)
+	for t, c := range cache.Constructors {
+		if listableStatus(c.Status) {
+			components = append(components, t)
+		}
 	}
 	printAll("Caches")
 
-	for t := range ratelimit.Constructors {
-		components = append(components, t)
+	for t, c := range ratelimit.Constructors {
+		if listableStatus(c.Status) {
+			components = append(components, t)
+		}
 	}
 	printAll("Rate Limits")
 
-	for t := range buffer.Constructors {
-		components = append(components, t)
+	for t, c := range buffer.Constructors {
+		if listableStatus(c.Status) {
+			components = append(components, t)
+		}
 	}
 	printAll("Buffers")
 
-	for t := range metrics.Constructors {
-		components = append(components, t)
+	for t, c := range metrics.Constructors {
+		if listableStatus(c.Status) {
+			components = append(components, t)
+		}
 	}
 	printAll("Metrics")
 
-	for t := range tracer.Constructors {
-		components = append(components, t)
+	for t, c := range tracer.Constructors {
+		if listableStatus(c.Status) {
+			components = append(components, t)
+		}
 	}
 	printAll("Tracers")
 

@@ -915,7 +915,7 @@ var _ = RegisterMethod(
 	NewMethodSpec(
 		"parse_timestamp_unix", "",
 	).InCategory(
-		MethodCategoryParsing,
+		MethodCategoryTime,
 		"Attempts to parse a string as a timestamp, following ISO 8601 format by default, and returns the unix epoch.",
 		NewExampleSpec("",
 			`root.doc.timestamp = this.doc.timestamp.parse_timestamp_unix()`,
@@ -954,6 +954,59 @@ func parseTimestampMethod(target Function, args ...interface{}) (Function, error
 			return nil, err
 		}
 		return ut.Unix(), nil
+	}), nil
+}
+
+//------------------------------------------------------------------------------
+
+var _ = RegisterMethod(
+	NewMethodSpec(
+		"format_timestamp", "",
+	).InCategory(
+		MethodCategoryTime,
+		"Attempts to format a unix timestamp as a string, following ISO 8601 format by default.",
+		NewExampleSpec("",
+			`root.something_at = (this.created_at + 300).format_timestamp()`,
+			// `{"created_at":1597405526}`,
+			// `{"something_at":"2020-08-14T11:50:26.371Z"}`,
+		),
+		NewExampleSpec(
+			"An optional string argument can be used in order to specify the expected format of the timestamp. The format is defined by showing how the reference time, defined to be Mon Jan 2 15:04:05 -0700 MST 2006, would be displayed if it were the value.",
+			`root.something_at = (this.created_at + 300).format_timestamp("2006-Jan-02 15:04:05")`,
+			// `{"created_at":1597405526}`,
+			// `{"something_at":"2020-Aug-14 11:50:26"}`,
+		),
+		NewExampleSpec(
+			"A second optional string argument can also be used in order to specify a timezone, otherwise the local timezone is used.",
+			`root.something_at = (this.created_at + 300).format_timestamp("2006-Jan-02 15:04:05", "UTC")`,
+			`{"created_at":1597405526}`,
+			`{"something_at":"2020-Aug-14 11:50:26"}`,
+		),
+	).Beta(),
+	true, formatTimestampMethod,
+	ExpectBetweenNAndMArgs(0, 2),
+	ExpectStringArg(0),
+	ExpectStringArg(1),
+)
+
+func formatTimestampMethod(target Function, args ...interface{}) (Function, error) {
+	layout := time.RFC3339
+	if len(args) > 0 {
+		layout = args[0].(string)
+	}
+	timezone := time.Local
+	if len(args) > 1 {
+		var err error
+		if timezone, err = time.LoadLocation(args[1].(string)); err != nil {
+			return nil, fmt.Errorf("failed to parse timezone location name: %w", err)
+		}
+	}
+	return simpleMethod(target, func(v interface{}, ctx FunctionContext) (interface{}, error) {
+		u, err := IToInt(v)
+		if err != nil {
+			return nil, err
+		}
+		return time.Unix(u, 0).In(timezone).Format(layout), nil
 	}), nil
 }
 
@@ -1157,6 +1210,130 @@ func regexpFindAllSubmatchMethod(target Function, args ...interface{}) (Function
 
 var _ = RegisterMethod(
 	NewMethodSpec(
+		"re_find_object", "",
+	).InCategory(
+		MethodCategoryRegexp,
+		"Returns an object containing the first match of the regular expression and the matches of its subexpressions. The key of each match value is the name of the group when specified, otherwise it is the index of the matching group, starting with the expression as a whole at 0.",
+		NewExampleSpec("",
+			`root.matches = this.value.re_find_object("a(?P<foo>x*)b")`,
+			`{"value":"-axxb-ab-"}`,
+			`{"matches":{"0":"axxb","foo":"xx"}}`,
+		),
+		NewExampleSpec("",
+			`root.matches = this.value.re_find_object("(?P<key>\\w+):\\s+(?P<value>\\w+)")`,
+			`{"value":"option1: value1"}`,
+			`{"matches":{"0":"option1: value1","key":"option1","value":"value1"}}`,
+		),
+	),
+	true, regexpFindSubmatchObjectMethod,
+	ExpectNArgs(1),
+	ExpectStringArg(0),
+)
+
+func regexpFindSubmatchObjectMethod(target Function, args ...interface{}) (Function, error) {
+	re, err := regexp.Compile(args[0].(string))
+	if err != nil {
+		return nil, err
+	}
+	groups := re.SubexpNames()
+	for i, k := range groups {
+		if len(k) == 0 {
+			groups[i] = fmt.Sprintf("%v", i)
+		}
+	}
+	return simpleMethod(target, func(v interface{}, ctx FunctionContext) (interface{}, error) {
+		result := make(map[string]interface{}, len(groups))
+		switch t := v.(type) {
+		case string:
+			groupMatches := re.FindStringSubmatch(t)
+			for i, match := range groupMatches {
+				key := groups[i]
+				result[key] = match
+			}
+		case []byte:
+			groupMatches := re.FindSubmatch(t)
+			for i, match := range groupMatches {
+				key := groups[i]
+				result[key] = match
+			}
+		default:
+			return nil, NewTypeError(v, ValueString)
+		}
+		return result, nil
+	}), nil
+}
+
+//------------------------------------------------------------------------------
+
+var _ = RegisterMethod(
+	NewMethodSpec(
+		"re_find_all_object", "",
+	).InCategory(
+		MethodCategoryRegexp,
+		"Returns an array of objects containing all matches of the regular expression and the matches of its subexpressions. The key of each match value is the name of the group when specified, otherwise it is the index of the matching group, starting with the expression as a whole at 0.",
+		NewExampleSpec("",
+			`root.matches = this.value.re_find_all_object("a(?P<foo>x*)b")`,
+			`{"value":"-axxb-ab-"}`,
+			`{"matches":[{"0":"axxb","foo":"xx"},{"0":"ab","foo":""}]}`,
+		),
+		NewExampleSpec("",
+			`root.matches = this.value.re_find_all_object("(?m)(?P<key>\\w+):\\s+(?P<value>\\w+)$")`,
+			`{"value":"option1: value1\noption2: value2\noption3: value3"}`,
+			`{"matches":[{"0":"option1: value1","key":"option1","value":"value1"},{"0":"option2: value2","key":"option2","value":"value2"},{"0":"option3: value3","key":"option3","value":"value3"}]}`,
+		),
+	),
+	true, regexpFindAllSubmatchObjectMethod,
+	ExpectNArgs(1),
+	ExpectStringArg(0),
+)
+
+func regexpFindAllSubmatchObjectMethod(target Function, args ...interface{}) (Function, error) {
+	re, err := regexp.Compile(args[0].(string))
+	if err != nil {
+		return nil, err
+	}
+	groups := re.SubexpNames()
+	for i, k := range groups {
+		if len(k) == 0 {
+			groups[i] = fmt.Sprintf("%v", i)
+		}
+	}
+	return simpleMethod(target, func(v interface{}, ctx FunctionContext) (interface{}, error) {
+		var result []interface{}
+		switch t := v.(type) {
+		case string:
+			reMatches := re.FindAllStringSubmatch(t, -1)
+			result = make([]interface{}, 0, len(reMatches))
+			for _, matches := range reMatches {
+				obj := make(map[string]interface{}, len(groups))
+				for i, match := range matches {
+					key := groups[i]
+					obj[key] = match
+				}
+				result = append(result, obj)
+			}
+		case []byte:
+			reMatches := re.FindAllSubmatch(t, -1)
+			result = make([]interface{}, 0, len(reMatches))
+			for _, matches := range reMatches {
+				obj := make(map[string]interface{}, len(groups))
+				for i, match := range matches {
+					key := groups[i]
+					obj[key] = match
+				}
+				result = append(result, obj)
+			}
+		default:
+			return nil, NewTypeError(v, ValueString)
+		}
+		return result, nil
+	}), nil
+}
+
+//------------------------------------------------------------------------------
+
+var _ = RegisterMethod(
+	NewMethodSpec(
 		"re_match", "",
 	).InCategory(
 		MethodCategoryRegexp,
@@ -1289,6 +1466,11 @@ var _ = RegisterMethod(
 			`root.nested_json = this.string()`,
 			`{"foo":"bar"}`,
 			`{"nested_json":"{\"foo\":\"bar\"}"}`,
+		),
+		NewExampleSpec("",
+			`root.id = this.id.string()`,
+			`{"id":228930314431312345}`,
+			`{"id":"228930314431312345"}`,
 		),
 	),
 	false, stringMethod,

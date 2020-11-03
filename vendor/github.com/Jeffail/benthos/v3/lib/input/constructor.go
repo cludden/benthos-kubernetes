@@ -62,14 +62,13 @@ type TypeSpec struct {
 		stats metrics.Type,
 	) (Type, error)
 
+	Status      docs.Status
 	Summary     string
 	Description string
 	Categories  []Category
 	Footnotes   string
 	FieldSpecs  docs.FieldSpecs
 	Examples    []docs.AnnotatedExample
-	Beta        bool
-	Deprecated  bool
 }
 
 // Constructors is a map of all input types with their specs.
@@ -82,6 +81,7 @@ const (
 	TypeAMQP            = "amqp"
 	TypeAMQP09          = "amqp_0_9"
 	TypeAMQP1           = "amqp_1"
+	TypeAWSS3           = "aws_s3"
 	TypeBloblang        = "bloblang"
 	TypeBroker          = "broker"
 	TypeCSVFile         = "csv"
@@ -113,6 +113,7 @@ const (
 	TypeSocketServer    = "socket_server"
 	TypeSQS             = "sqs"
 	TypeSTDIN           = "stdin"
+	TypeSubprocess      = "subprocess"
 	TypeTCP             = "tcp"
 	TypeTCPServer       = "tcp_server"
 	TypeUDPServer       = "udp_server"
@@ -128,6 +129,7 @@ type Config struct {
 	AMQP            reader.AMQPConfig            `json:"amqp" yaml:"amqp"`
 	AMQP09          reader.AMQP09Config          `json:"amqp_0_9" yaml:"amqp_0_9"`
 	AMQP1           reader.AMQP1Config           `json:"amqp_1" yaml:"amqp_1"`
+	AWSS3           AWSS3Config                  `json:"aws_s3" yaml:"aws_s3"`
 	Bloblang        BloblangConfig               `json:"bloblang" yaml:"bloblang"`
 	Broker          BrokerConfig                 `json:"broker" yaml:"broker"`
 	CSVFile         CSVFileConfig                `json:"csv" yaml:"csv"`
@@ -160,6 +162,7 @@ type Config struct {
 	SocketServer    SocketServerConfig           `json:"socket_server" yaml:"socket_server"`
 	SQS             reader.AmazonSQSConfig       `json:"sqs" yaml:"sqs"`
 	STDIN           STDINConfig                  `json:"stdin" yaml:"stdin"`
+	Subprocess      SubprocessConfig             `json:"subprocess" yaml:"subprocess"`
 	TCP             TCPConfig                    `json:"tcp" yaml:"tcp"`
 	TCPServer       TCPServerConfig              `json:"tcp_server" yaml:"tcp_server"`
 	UDPServer       UDPServerConfig              `json:"udp_server" yaml:"udp_server"`
@@ -175,6 +178,7 @@ func NewConfig() Config {
 		AMQP:            reader.NewAMQPConfig(),
 		AMQP09:          reader.NewAMQP09Config(),
 		AMQP1:           reader.NewAMQP1Config(),
+		AWSS3:           NewAWSS3Config(),
 		Bloblang:        NewBloblangConfig(),
 		Broker:          NewBrokerConfig(),
 		CSVFile:         NewCSVFileConfig(),
@@ -207,6 +211,7 @@ func NewConfig() Config {
 		SocketServer:    NewSocketServerConfig(),
 		SQS:             reader.NewAmazonSQSConfig(),
 		STDIN:           NewSTDINConfig(),
+		Subprocess:      NewSubprocessConfig(),
 		TCP:             NewTCPConfig(),
 		TCPServer:       NewTCPServerConfig(),
 		UDPServer:       NewUDPServerConfig(),

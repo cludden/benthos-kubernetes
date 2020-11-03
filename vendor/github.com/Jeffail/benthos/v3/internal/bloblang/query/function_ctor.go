@@ -1,6 +1,7 @@
 package query
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -37,6 +38,14 @@ func (f closureFunction) QueryTargets(ctx TargetsContext) []TargetPath {
 }
 
 //------------------------------------------------------------------------------
+
+func expandLiteralArgs(args []interface{}) {
+	for i, dArg := range args {
+		if lit, isLit := dArg.(*Literal); isLit {
+			args[i] = lit.Value
+		}
+	}
+}
 
 func withDynamicArgs(args []interface{}, fn FunctionCtor) Function {
 	fns := []Function{}
@@ -159,6 +168,21 @@ func ExpectStringArg(i int) ArgCheckFn {
 	}
 }
 
+// ExpectFunctionArg ensures that parameters are query functions. If the
+// argument is a static value it will be converted into a literal function.
+func ExpectFunctionArg(i int) ArgCheckFn {
+	return func(args []interface{}) error {
+		if len(args) <= i {
+			return nil
+		}
+		if _, ok := args[i].(Function); ok {
+			return nil
+		}
+		args[i] = NewLiteralFunction(args[i])
+		return nil
+	}
+}
+
 // ExpectAllStringArgs returns an error if any argument is not a string type (or
 // a byte slice that can be converted).
 func ExpectAllStringArgs() ArgCheckFn {
@@ -187,6 +211,11 @@ func ExpectIntArg(i int) ArgCheckFn {
 		case int64:
 		case float64:
 			args[i] = int64(t)
+		case json.Number:
+			var err error
+			if args[i], err = t.Int64(); err != nil {
+				return fmt.Errorf("expected int argument, failed to parse: %w", err)
+			}
 		default:
 			return fmt.Errorf("expected int argument, received %T", args[i])
 		}
@@ -204,6 +233,11 @@ func ExpectFloatArg(i int) ArgCheckFn {
 		case int64:
 			args[i] = float64(t)
 		case float64:
+		case json.Number:
+			var err error
+			if args[i], err = t.Float64(); err != nil {
+				return fmt.Errorf("expected float argument, failed to parse: %w", err)
+			}
 		default:
 			return fmt.Errorf("expected float argument, received %T", args[i])
 		}
@@ -253,6 +287,7 @@ func InitFunction(name string, args ...interface{}) (Function, error) {
 	if !exists {
 		return nil, badFunctionErr(name)
 	}
+	expandLiteralArgs(args)
 	return ctor(args...)
 }
 
